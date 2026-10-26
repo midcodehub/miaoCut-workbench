@@ -1,0 +1,45 @@
+src/client/poster-renderer.ts
+  s_5e55143c7b307d::t_46de585022f81b 1-65,68
+  s_5e55143c7b307d::t_ad33dfacf56eec 66-67,69-70
+src/client/use-poster.ts
+  s_5e55143c7b307d::t_f9b9ecac3a420e 1-130
+  s_5e55143c7b307d::t_239bfdf5766fd6 131-146
+src/domain/poster.ts
+  s_5e55143c7b307d::t_1aa8d7aa2d23ed 1-212
+  s_5e55143c7b307d::t_e26f4090c9aea3 213-220
+src/client/poster-store.ts
+  s_5e55143c7b307d::t_545409e69930e7 1-82
+  s_5e55143c7b307d::t_d0c7ce47117e6f 83-97
+src/domain/poster.test.ts
+  s_5e55143c7b307d::t_bf8cbe4b47f040 1-131
+  s_5e55143c7b307d::t_2c21e9bfe433d6 132-142
+src/components/poster-workbench.tsx
+  s_5e55143c7b307d::t_f21722e5baa382 1-199
+  s_5e55143c7b307d::t_66af3954657f3c 200
+README.md
+  s_5e55143c7b307d::t_11e83087f431c2 7,93-125
+src/app/globals.css
+  s_5e55143c7b307d::t_81c03263b24160 193-224
+src/app/poster/page.tsx
+  s_5e55143c7b307d::t_80506ed32facac 1-4
+src/components/internal-workbench.tsx
+  s_5e55143c7b307d::t_997d76bef882f4 4,20,39,58,73,354-359,421,452-455
+src/components/product-workbench.tsx
+  s_5e55143c7b307d::t_242b312dce5557 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2f7e2234ade62c21492e79a915a5c11df74d74eb",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
