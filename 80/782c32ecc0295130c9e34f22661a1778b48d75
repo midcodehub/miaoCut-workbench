@@ -1,0 +1,52 @@
+src/client/idb.ts
+  s_5e55143c7b307d::t_6809b13ec8a5d5 1-86
+src/client/poster-store.ts
+  s_5e55143c7b307d::t_b96c42fd816278 2,5-7,13-18,20,23-27
+src/client/recolor-store.ts
+  s_5e55143c7b307d::t_961cb7c8a21e80 1-38
+src/domain/recolor.test.ts
+  s_5e55143c7b307d::t_e31cc9b9c8ec05 1-227
+  s_5e55143c7b307d::t_2be2bca557cf01 228-241
+src/client/recolor-engine.ts
+  s_5e55143c7b307d::t_b729511a124e3c 1-113
+src/components/recolor-workbench.tsx
+  s_5e55143c7b307d::t_42284fa7fb3be7 1-259
+src/domain/recolor.ts
+  s_5e55143c7b307d::t_743f737cac7d0c 1-303
+  s_5e55143c7b307d::t_0a09d30fbeee0f 304-343
+src/client/use-recolor.ts
+  s_5e55143c7b307d::t_42952f875886cc 1-223
+  s_5e55143c7b307d::t_1a8ebbde0cb1e0 224-225
+src/app/recolor/page.tsx
+  s_5e55143c7b307d::t_28fd6c47649904 1-4
+README.md
+  s_5e55143c7b307d::t_aad6a073139ae8 7,113,120,126-172
+package.json
+  s_5e55143c7b307d::t_b98f5228ebef07 11-12
+scripts/bench-recolor.ts
+  s_5e55143c7b307d::t_457911cdd8e71a 1-38
+src/app/globals.css
+  s_5e55143c7b307d::t_4096de86dd59bc 225-255,365-369
+src/components/internal-workbench.tsx
+  s_5e55143c7b307d::t_ca5b92e46e4171 21,40,59,361-366,428,460-461,463-464
+src/components/poster-workbench.tsx
+  s_5e55143c7b307d::t_bf44d127390e78 19,36,106
+src/components/product-workbench.tsx
+  s_5e55143c7b307d::t_528bcb3bd637d3 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "80782c32ecc0295130c9e34f22661a1778b48d75",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "unknown"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
