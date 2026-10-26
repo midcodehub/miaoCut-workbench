@@ -1,0 +1,33 @@
+LICENSE
+  s_5e55143c7b307d::t_3a0224a823bed6 1-21
+README.md
+  s_5e55143c7b307d::t_4a3aa801803bcb 3,5,7,28,86,89
+eslint.config.mjs
+  s_5e55143c7b307d::t_6fce10061e70b8 11
+src/client/free-composition.ts
+  s_5e55143c7b307d::t_664a0d512a0364 24
+src/vendor/editor/README.md
+  s_5e55143c7b307d::t_22d8635c325e92 1-23
+src/vendor/editor/engine.js
+  s_5e55143c7b307d::t_fb66e7f37b5428 1-801
+src/vendor/editor/presets.js
+  s_5e55143c7b307d::t_d90830be53a2c8 1-237
+tailwind.config.cjs
+  s_5e55143c7b307d::t_7ab49836ba74aa 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7860deece30e88cc5625b241e8e95e1e61efede8",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
