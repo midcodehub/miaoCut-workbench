@@ -16,7 +16,7 @@ const copy = {
     title: "海报文字", intro: "给商品图加上标题、卖点和价格。文字是精确渲染的：内容逐字一致，修改文字不会触发 AI 生成，也不收费。",
     bgTitle: "背景", uploadBg: "上传背景图片", replaceBg: "更换图片", solidBg: "纯色背景", useSolid: "改用纯色", color: "颜色",
     bgHint: "海报固定为 1:1、1024 × 1024 像素。图片按“填满”方式居中裁切。图片和草稿只保存在当前浏览器。",
-    fromResult: "已把场景结果设为背景，文字保持不变。", textTitle: "文字", addText: "添加文字", limit: `最多 ${MAX_TEXT_LAYERS} 个文字框`,
+    fromResult: "已把传来的图片设为背景，文字保持不变。", textTitle: "文字", addText: "添加文字", limit: `最多 ${MAX_TEXT_LAYERS} 个文字框`,
     empty: "还没有文字。点击“添加文字”开始。", editTitle: "编辑文字", content: "内容", font: "字体", weight: "粗细", regular: "常规", bold: "粗体",
     align: "对齐", left: "左", center: "中", right: "右", textColor: "文字颜色", count: (n: number) => `${n} / ${MAX_TEXT_LENGTH}`,
     autofit: "字号自动适应文本框：拖动文本框右下角改变大小。价格、日期等数字直接写在文字里，导出时逐字保留。",
@@ -33,7 +33,7 @@ const copy = {
     title: "Poster text", intro: "Add a headline, selling points and a price to a product image. Text is rendered exactly: the content stays character for character, and editing it never runs AI or costs credits.",
     bgTitle: "Background", uploadBg: "Upload a background image", replaceBg: "Replace image", solidBg: "Solid colour", useSolid: "Use a solid colour", color: "Colour",
     bgHint: "Posters are 1:1, 1024 × 1024 pixels. Images are centre-cropped to fill. Images and drafts stay in this browser.",
-    fromResult: "A scene result is now the background. Your text is unchanged.", textTitle: "Text", addText: "Add text", limit: `Up to ${MAX_TEXT_LAYERS} text boxes`,
+    fromResult: "The image you sent is now the background. Your text is unchanged.", textTitle: "Text", addText: "Add text", limit: `Up to ${MAX_TEXT_LAYERS} text boxes`,
     empty: "No text yet. Choose “Add text” to start.", editTitle: "Edit text", content: "Content", font: "Font", weight: "Weight", regular: "Regular", bold: "Bold",
     align: "Align", left: "Left", center: "Centre", right: "Right", textColor: "Text colour", count: (n: number) => `${n} / ${MAX_TEXT_LENGTH}`,
     autofit: "Font size fits the box automatically: drag the bottom-right corner to resize. Write prices and dates directly in the text; they are kept exactly.",
@@ -103,7 +103,7 @@ export function PosterWorkbench() {
     <header className="site-header"><div className="header-content">
       <a href="https://miaocut.app" className="brand-link" aria-label="MiaoCut"><span className="brand-mark"><Scissors size={19} strokeWidth={1.7} /></span>MiaoCut</a>
       <span className="header-divider" /><span className="header-workspace">{c.title}</span>
-      <div className="header-actions"><a className="header-link" href="/workbench/product"><ArrowLeft size={13} />{c.back}</a>
+      <div className="header-actions"><a className="header-link" href="/workbench/recolor">{locale === "zh" ? "精确换色" : "Recolour"}</a><a className="header-link" href="/workbench/product"><ArrowLeft size={13} />{c.back}</a>
         <button type="button" className="icon-button language-button" aria-label={c.language} onClick={() => app.setLocale(locale === "zh" ? "en" : "zh")}>{locale === "zh" ? "EN" : "中"}</button>
         <button type="button" className="icon-button" aria-label={app.dark ? c.switchLight : c.switchDark} onClick={app.toggleTheme}>{app.dark ? <Sun size={18} /> : <Moon size={18} />}</button>
       </div>
