@@ -1,17 +1,16 @@
 # MiaoCut Scene Workbench
 
-独立 Next.js 商品场景工作台，包含P0交互演示、真实服务内测入口，以及免费/AI效果对比。旧站仍使用原来的静态构建与网关；此目录不加入旧站导航或生产发布脚本。
+独立 Next.js 商品场景工作台，包含P0交互演示、真实服务内测入口，以及免费/AI效果对比。本仓库从 [midcodehub/miaoCut](https://github.com/midcodehub/miaoCut) 拆出：旧站是直接发布仓库根目录的静态站，放不下需要服务端路由的 Next 应用，所以工作台有自己的仓库和部署。后端（任务、积分、GPU 调度）在私有仓库，这里只有界面、公开业务类型和受限转发。
 
-Independent Next.js product-scene workbench with a local demo, an internal API route, and free/AI result comparison. The existing static website keeps its current build and gateway.
+Independent Next.js product-scene workbench with a local demo, an internal API route, and free/AI result comparison. Split out of midcodehub/miaoCut, whose root is published as static files and cannot host a Next app with server routes. The backend lives in a private repository.
 
-`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成直接复用父目录`editor/engine.js`，请从完整仓库构建。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
+`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成使用`src/vendor/editor/`里的旧站编辑器引擎副本（原文件、来源 commit 和更新方法见该目录 README）。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
 
 ## 启动 / Run
 
 要求 Node.js 20.9+；当前使用 Node.js 22。
 
 ```bash
-cd workbench
 npm ci
 npm run dev
 ```
@@ -26,7 +25,7 @@ npm run build
 npm start
 ```
 
-`basePath` 固定为 `/workbench`，静态资源也包含该前缀。修改路径后必须重新构建。工作台有独立样式入口，复用父仓库 Tailwind 配置、Geist 字体和 DESIGN.md 的 Quiet Workbench 视觉规则。
+`basePath` 固定为 `/workbench`，静态资源也包含该前缀。修改路径后必须重新构建。工作台有独立样式入口，沿用旧站的字体、品牌色和暗色约定（主题已内联在 `tailwind.config.cjs`）、Geist 字体和 Quiet Workbench 视觉规则。
 
 ## 可以体验什么 / What works
 
@@ -84,10 +83,10 @@ No image upload or render-job API is called. This mode must remain clearly label
 
 语言使用 `mc.workbench.locale`；主题沿用旧站 `theme` 偏好。清除工作台不清除账户凭据或站点其他存储。
 
-- `public/demo/sneaker.webp`：复用本仓库 `examples/product-cutout.webp`。
+- `public/demo/sneaker.webp`：复制自旧站仓库 midcodehub/miaoCut 的 `examples/product-cutout.webp`。
 - `public/demo/marble.png`：用于本地展示的固定空场景图片，已移除生成参数等元数据。
 - 原木与几何场景由浏览器绘制，不会调用生成服务。
-- 字体复用仓库已有本地 Geist 文件，不请求外部字体服务。
+- 字体使用 `public/fonts/` 里的本地 Geist 文件，不请求外部字体服务。
 
 下一步接入真实服务时，在公开前端只保留业务契约与 UI。凭据、授权、计费、调度以及模型编排属于服务端。
 

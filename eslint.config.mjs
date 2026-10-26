@@ -8,5 +8,5 @@ export default defineConfig([
   // Local Blob URLs and canvas previews are not served by the image optimizer.
   { rules: { "@next/next/no-img-element": "off" } },
   { files: ["*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },
-  globalIgnores([".next/**", "next-env.d.ts", "out/**"]),
+  globalIgnores([".next/**", "next-env.d.ts", "out/**", "src/vendor/**"]),
 ]);

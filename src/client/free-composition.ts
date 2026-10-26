@@ -21,7 +21,7 @@ export async function renderFreeComposition(doc:ProductDocument, asset:LocalAsse
   const placed = document.createElement('canvas'), backdrop = document.createElement('canvas');
   try {
     const [image, engineModule, presetModule, marble] = await Promise.all([
-      imageFromUrl(url), import('../../../editor/engine.js'), import('../../../editor/presets.js'),
+      imageFromUrl(url), import('../vendor/editor/engine.js'), import('../vendor/editor/presets.js'),
       background==='scene' ? loadBackdrop() : Promise.resolve(undefined),
     ]);
     signal.throwIfAborted();
