@@ -1,5 +1,5 @@
 import type { LocalAsset } from "@/domain/contracts";
-import type { ServiceAsset, ServiceGroup, ServiceGroupQuote, ServiceGroupRequest, ServiceJob, ServiceJobRequest } from "@/domain/service-contracts";
+import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest, ServiceGroup, ServiceGroupQuote, ServiceGroupRequest, ServiceJob, ServiceJobRequest } from "@/domain/service-contracts";
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
 
@@ -29,6 +29,12 @@ export class WorkbenchService {
   group(id: string, signal?: AbortSignal) { return this.call<ServiceGroup>(`groups/${id}`, undefined, signal); }
   cancelGroup(id: string) { return this.call<ServiceGroup>(`groups/${id}/cancel`, {}); }
   resumeGroup(id: string) { return this.call<ServiceGroup>(`groups/${id}/resume`, {}); }
+  // 批量场景：与四候选共用同一组接口，请求里 kind 为 "batch"。报价响应不回显请求，确认时原样再发一次。
+  batchQuote(request: ServiceBatchRequest) { return this.call<ServiceBatchQuote>("group-quotes", { request }); }
+  createBatch(groupId: string, request: ServiceBatchRequest, signal?: AbortSignal) { return this.call<ServiceBatch>("groups", { groupId, request }, signal); }
+  batch(id: string, signal?: AbortSignal) { return this.call<ServiceBatch>(`groups/${id}`, undefined, signal); }
+  cancelBatch(id: string) { return this.call<ServiceBatch>(`groups/${id}/cancel`, {}); }
+  resumeBatch(id: string) { return this.call<ServiceBatch>(`groups/${id}/resume`, {}); }
   async upload(file: File, onProgress: (percent: number) => void): Promise<ServiceAsset> {
     const blob = await canonicalPng(file);
     const image = await decodeAsset(blob, file.name, "upload"), bytes = await blob.arrayBuffer();
