@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalAsset, Locale } from "@/domain/contracts";
 import {
-  DEFAULT_PLAN, MAX_BATCH_GROUPS, MAX_BATCH_PRODUCTS, analyzeSubject, batchActive, batchRequestFor, checkSubject, entryOutcome, failedEntryIds, included,
-  validBatchDraft, zipFiles, zipName,
+  DEFAULT_PLAN, HISTORY_LIMIT, MAX_BATCH_GROUPS, MAX_BATCH_PRODUCTS, analyzeSubject, batchActive, batchRequestFor, checkSubject, entryOutcome, failedEntryIds, included,
+  remoteBatchValid, remoteZipName, summaryActive, validBatchDraft, validGroupSummaries, zipFiles, zipName,
   type BatchDraft, type BatchEntryRecord, type BatchGroupRecord, type BatchPlan, type EntryOutcome,
 } from "@/domain/batch";
-import type { ServiceBatch, ServiceBatchQuote, ServiceBatchRequest, ServiceExecution, ServiceJobRequest } from "@/domain/service-contracts";
+import type { ServiceBatch, ServiceBatchItem, ServiceBatchQuote, ServiceBatchRequest, ServiceExecution, ServiceGroupSummary, ServiceJobRequest } from "@/domain/service-contracts";
 import { AssetError, downloadPng } from "./assets";
 import { ServiceError, WorkbenchService } from "./service-api";
 
-export type BatchProblem = "login" | "access" | "error" | "storage" | "insufficient" | "quoteExpired" | "paused" | "offline" | "unknown" | "unavailable" | "tooManyBatches" | "empty" | null;
+export type BatchProblem = "login" | "access" | "error" | "storage" | "insufficient" | "quoteExpired" | "paused" | "offline" | "unknown" | "unavailable" | "tooManyBatches" | "empty" | "notFound" | null;
 /** 一次报价：服务端的价格，加上页面提交的那份请求（报价响应不回显请求，确认时要原样再发一次）。 */
 export interface BatchOffer { quote: ServiceBatchQuote; request: ServiceBatchRequest; redo: boolean }
 
@@ -20,6 +20,8 @@ const UPLOAD_SLOTS = 3;
 /** 同时提交的“提取主体”任务数。账户同时最多 3 笔冻结订单，留 1 个给其他操作；GPU 本身一次只跑一个。 */
 const SEGMENT_SLOTS = 2;
 const POLL_MS = 2000;
+/** “我的批次”列表的刷新间隔：有批次在服务端运行时 10 秒一次，否则 60 秒一次（列表只有摘要，一次响应约 1 KB × 行数）。 */
+const HISTORY_ACTIVE_MS = 10_000, HISTORY_IDLE_MS = 60_000;
 
 function sleep(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -62,6 +64,9 @@ export function useBatch(sessionKey: string) {
   const [thumbs, setThumbs] = useState<Record<string, LocalAsset>>({}), [results, setResults] = useState<Record<string, LocalAsset>>({});
   const files = useRef(new Map<string, File>()), running = useRef(new Set<string>()), uploading = useRef(new Set<string>());
   const quoteLock = useRef(false), loadingImages = useRef(new Set<string>());
+  // 我的批次：服务端列表（换了设备也找得到）；opened 是点开查看的、本页面没有跟踪的批次。
+  const [history, setHistory] = useState<ServiceGroupSummary[]>([]), [historyState, setHistoryState] = useState<"idle" | "loading" | "error">("idle"), [opened, setOpened] = useState<string | null>(null);
+  const historyActive = useRef(false);
 
   const replace = useCallback((next: BatchDraft) => {
     if (!next.authUserId) throw new ServiceError("login_required", 401);
@@ -90,7 +95,7 @@ export function useBatch(sessionKey: string) {
   useEffect(() => {
     const controller = new AbortController();
     async function initialize() {
-      setConnected(false); setThumbs({}); setResults({}); setViews({}); loadingImages.current.clear();
+      setConnected(false); setThumbs({}); setResults({}); setViews({}); loadingImages.current.clear(); setHistory([]); setHistoryState("idle"); setOpened(null);
       setDark(document.documentElement.classList.contains("dark"));
       try { setLocaleState(localStorage.getItem("mc.workbench.locale") === "en" ? "en" : "zh"); } catch { /* 语言偏好是可选的 */ }
       try {
@@ -286,6 +291,65 @@ export function useBatch(sessionKey: string) {
     return () => controller.abort();
   }, [api, connected, groupsKey, poll, replace, report, resume]);
 
+  // ── 我的批次：服务端列表 + 点开本页没有跟踪的批次 ─────────────────────────────────────────────
+  // 列表只有摘要（状态、进度计数、金额、时间），不带请求，也不逐项读取：批次是否在运行由服务端的状态决定。
+  // 响应先过 validGroupSummaries 再显示，形状或计数对不上的行直接丢掉。
+  const refreshHistory = useCallback(async (signal?: AbortSignal) => {
+    setHistoryState(state => (state === "idle" ? "loading" : state));
+    try {
+      const rows = validGroupSummaries(await api.batches(HISTORY_LIMIT, signal));
+      if (signal?.aborted) return;
+      historyActive.current = rows.some(summaryActive);
+      setHistory(rows); setHistoryState("idle");
+    } catch (error) {
+      if (signal?.aborted) return;
+      setHistoryState("error");
+      if (error instanceof ServiceError && error.status === 401) report(error);
+    }
+  }, [api, report]);
+  const historyReady = connected && !!limits;
+  useEffect(() => {
+    if (!historyReady) return;
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    async function loop() {
+      await refreshHistory(controller.signal);
+      if (!controller.signal.aborted) timer = setTimeout(() => void loop(), historyActive.current ? HISTORY_ACTIVE_MS : HISTORY_IDLE_MS);
+    }
+    void loop(); // groupsKey 变化（新确认了一个批次）时重新开始，列表里马上出现新的一行
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [historyReady, groupsKey, refreshHistory, resume]);
+  // 本页跟踪的批次状态变化（开始、暂停、完成、停止）时马上刷新列表，不等下一个定时：列表里那一行不应该比上面的进度条慢。
+  // 第一次渲染只记下状态，不请求（上面的循环已经在加载）。
+  const localStatusKey = draft.groups.map(group => { const view = views[group.groupId]; return `${group.groupId}:${view ? `${view.status}:${batchActive(view) ? 1 : 0}` : ""}`; }).join(",");
+  const lastLocalStatus = useRef<string | null>(null);
+  useEffect(() => {
+    const first = lastLocalStatus.current === null;
+    lastLocalStatus.current = localStatusKey;
+    if (!first && historyReady) void refreshHistory();
+  }, [historyReady, localStatusKey, refreshHistory]);
+  // 点开一个本页没有跟踪的批次：按 groupId 取完整视图（每一项的状态和结果图），批次还在推进就继续轮询。
+  // 本页跟踪的批次（localStorage 里有记录）由上面的批次轮询负责，这里不重复请求。
+  useEffect(() => {
+    if (!connected || !opened || current.current.groups.some(group => group.groupId === opened)) return;
+    const controller = new AbortController(), signal = controller.signal, groupId = opened;
+    void (async () => {
+      try {
+        while (!signal.aborted) {
+          const view = await api.batch(groupId, signal);
+          if (signal.aborted) return;
+          if (!remoteBatchValid(view, groupId)) throw new ServiceError("protocol_mismatch");
+          setViews(all => ({ ...all, [groupId]: view }));
+          if (!batchActive(view)) return;
+          await sleep(POLL_MS, signal);
+        }
+      } catch (error) {
+        if (signal.aborted) return;
+        if (error instanceof ServiceError && error.code === "group_not_found") { setOpened(null); setProblem("notFound"); } else report(error);
+      }
+    })();
+    return () => controller.abort();
+  }, [api, connected, opened, poll, report, resume]);
+
   // 只下载已经完成的结果图；下载时校验大小和 SHA-256，失败的下一次轮询再试。
   const succeededAssets = useMemo(() => Object.values(views).flatMap(view => view.items.flatMap(item => (item.result ? [item.result] : []))), [views]);
   useEffect(() => {
@@ -295,7 +359,8 @@ export function useBatch(sessionKey: string) {
       if (loadingImages.current.has(asset.assetId)) continue;
       loadingImages.current.add(asset.assetId);
       void api.image(asset, signal).then(image => {
-        if (!signal.aborted) setResults(all => ({ ...all, [asset.assetId]: image }));
+        // 批次在下载途中被收起（loadingImages 已清掉这张图）就丢弃，不再占内存。
+        if (!signal.aborted && loadingImages.current.has(asset.assetId)) setResults(all => ({ ...all, [asset.assetId]: image }));
       }).catch(() => { loadingImages.current.delete(asset.assetId); });
     }
   }, [api, connected, succeededAssets]);
@@ -338,7 +403,7 @@ export function useBatch(sessionKey: string) {
   }, [replace, report]);
   /** 全部结束后开始新的一批：清空商品和已记住的批次。 */
   const startOver = useCallback(() => {
-    files.current.clear(); setOffer(undefined); setViews({}); setThumbs({}); setResults({}); loadingImages.current.clear();
+    files.current.clear(); setOffer(undefined); setViews({}); setThumbs({}); setResults({}); loadingImages.current.clear(); setOpened(null);
     try { replace({ ...current.current, entries: [], groups: [] }); } catch (error) { report(error); }
   }, [replace, report]);
 
@@ -398,6 +463,38 @@ export function useBatch(sessionKey: string) {
     finally { setBusy(false); }
   }, [api, busy, report]);
 
+  // ── 我的批次：点开 / 收起 / 下载（本页没有跟踪的批次） ──────────────────────────────────────────
+  const openGroup = useCallback((groupId: string) => { if (!current.current.groups.some(group => group.groupId === groupId)) setOpened(groupId); }, []);
+  const closeGroup = useCallback(() => {
+    const groupId = opened;
+    setOpened(null);
+    if (!groupId) return;
+    const view = views[groupId];
+    if (!view) return;
+    // 收起时释放这个批次的结果图（最多 60 张）：它们只为这次查看下载，页面不需要一直占着内存。
+    const assetIds = new Set(view.items.flatMap(item => (item.result ? [item.result.assetId] : [])));
+    assetIds.forEach(id => loadingImages.current.delete(id));
+    setResults(all => Object.fromEntries(Object.entries(all).filter(([id]) => !assetIds.has(id))));
+    setViews(all => { const next = { ...all }; delete next[groupId]; return next; });
+  }, [opened, views]);
+  const remoteResult = useCallback((item: ServiceBatchItem) => (item.state === "succeeded" && item.result ? results[item.result.assetId] : undefined), [results]);
+  const downloadRemoteOne = useCallback((item: ServiceBatchItem) => {
+    const image = remoteResult(item);
+    if (image) downloadPng(image.blob, remoteZipName(item.index, item.scene, new Set()));
+  }, [remoteResult]);
+  /** 把这个批次已完成的结果打成 ZIP（文件名 product-NN_场景_1x1.png），在浏览器里完成。 */
+  const downloadRemoteZip = useCallback(async (groupId: string) => {
+    const view = views[groupId], used = new Set<string>(), items: { name: string; data: Uint8Array }[] = [];
+    for (const item of view?.items ?? []) {
+      const image = remoteResult(item);
+      if (image) items.push({ name: remoteZipName(item.index, item.scene, used), data: new Uint8Array(await image.blob.arrayBuffer()) });
+    }
+    if (items.length === 0) return 0;
+    const chunks = await zipFiles(items);
+    downloadPng(new Blob(chunks as BlobPart[], { type: "application/zip" }), `miaocut-batch-${groupId.slice(0, 8)}.zip`);
+    return items.length;
+  }, [remoteResult, views]);
+
   // ── 下载 ─────────────────────────────────────────────────────────────────────────────────────
   const resultOf = useCallback((entryId: string) => { const outcome = outcomes[entryId]; return outcome?.item.state === "succeeded" && outcome.item.result ? results[outcome.item.result.assetId] : undefined; }, [outcomes, results]);
   const scene = (entryId: string) => draft.groups.slice().reverse().map(group => group.request.entries.find(entry => entry.entryId === entryId)?.scene).find(Boolean) ?? draft.plan.scene;
@@ -432,6 +529,7 @@ export function useBatch(sessionKey: string) {
     addFiles, replaceEntry, retryEntry, setExcluded, removeEntry, startOver, offer, dismissOffer: () => setOffer(undefined), quoting, busy,
     requestQuote, requestRedo, acceptOffer, stop: (groupId: string) => groupAction(groupId, "stop"), resumeGroup: (groupId: string) => groupAction(groupId, "resume"),
     failedCount: Object.values(outcomes).filter(outcome => outcome?.item.state === "failed").length, failedIds: newestView ? failedEntryIds(newestView) : [],
+    history, historyState, refreshHistory: () => refreshHistory(), opened, openedView: opened ? views[opened] : undefined, openGroup, closeGroup, remoteResult, downloadRemoteOne, downloadRemoteZip,
     resultOf, downloadOne, downloadZip, doneCount: Object.values(outcomes).filter(outcome => outcome?.item.state === "succeeded").length,
   };
 }

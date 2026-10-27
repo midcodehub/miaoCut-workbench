@@ -1,5 +1,6 @@
 // Thin frontend transport only. Auth, asset ownership, orchestration and billing remain in the private gateway.
 import type { NextRequest } from "next/server";
+import { listQuery } from "@/domain/internal-query";
 
 const UUID = "[0-9a-fA-F-]{36}";
 const READ = new RegExp(`^(capabilities|assets/${UUID}|jobs/${UUID}|groups/${UUID})$`);
@@ -9,7 +10,9 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   const fail = (error: string, status: number) => Response.json({ error }, { status, headers: { "Cache-Control": "no-store" } });
   if (process.env.WORKBENCH_INTERNAL_ENABLED !== "1") return fail("internal_disabled", 404);
   const path = (await context.params).path.join("/");
-  if (!(request.method === "GET" ? READ : WRITE).test(path) || request.nextUrl.search) return fail("not_found", 404);
+  // 唯一允许带查询串的是“列出我的批次”：GET groups?kind=…&limit=…。查询串由 listQuery 校验后重新拼成，浏览器给的原文不会转发。
+  const list = request.method === "GET" && path === "groups", query = list ? listQuery(request.nextUrl.searchParams) : request.nextUrl.search ? null : "";
+  if (query === null || !(list || (request.method === "GET" ? READ : WRITE).test(path))) return fail("not_found", 404);
   const origin = request.headers.get("Origin");
   // Next can normalize the internal URL hostname to localhost. Compare against the HTTP Host seen by the browser.
   const expectedOrigin = process.env.WORKBENCH_PUBLIC_ORIGIN || `${request.nextUrl.protocol}//${request.headers.get("host") || request.nextUrl.host}`;
@@ -37,7 +40,7 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
     for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.length; }
   }
   try {
-    const response = await fetch(`${base.href.replace(/\/$/, "")}/comfy/v1/${path}`, {
+    const response = await fetch(`${base.href.replace(/\/$/, "")}/comfy/v1/${path}${query}`, {
       method: request.method, headers: { Authorization: authorization, "Content-Type": "application/json" },
       body: body ? new TextDecoder().decode(body) : undefined, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(20_000),
     });

@@ -308,6 +308,21 @@
   .batch-budget p { margin-top: 8px; font-size: 13px; }
   .batch-budget .primary-button { margin-top: 12px; }
   .batch-budget .sample-button { margin-top: 8px; }
+  .batch-history { border-top: 1px solid var(--wb-line); }
+  .batch-history-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; border: 1px solid var(--wb-line); border-radius: 10px; overflow: hidden; }
+  .batch-history-item + .batch-history-item { border-top: 1px solid var(--wb-line); }
+  /* 一行两层：第一层 时间 · 件数 · 状态 · [操作]，第二层 进度 · 已用/预算。左栏很窄时按钮也不会折行。 */
+  .batch-history-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 12px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .batch-history-when { color: var(--wb-text); font-weight: 600; }
+  .batch-history-count { color: var(--wb-text); }
+  .batch-history-detail { order: 3; flex: 1 0 100%; color: var(--wb-muted); line-height: 1.5; }
+  .batch-history-action { order: 2; margin-left: auto; width: auto; min-width: 0; height: 28px; padding: 0 10px; font-size: 12px; gap: 4px; white-space: nowrap; }
+  .batch-remote { padding: 4px 12px 14px; background: var(--wb-bg); border-top: 1px dashed var(--wb-line); }
+  .batch-remote-grid { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .batch-remote-item { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; padding: 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-surface); }
+  .batch-remote-image { width: 100%; height: auto; aspect-ratio: 1 / 1; display: grid; place-items: center; }
+  .batch-remote-name { font-size: 12px; color: var(--wb-text); }
+  .batch-remote-item .icon-button { width: 26px; height: 26px; align-self: flex-end; margin-top: -26px; }
   .workspace-footer { padding: 16px 1px 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--wb-muted); }.workspace-footer > span > span { color: var(--wb-line-strong); padding: 0 5px; }
   .workspace-footer button { display: flex; align-items: center; gap: 5px; padding: 3px 0; background: none; border: 0; color: var(--wb-muted); font-size: 12px; }.workspace-footer button:hover { color: var(--wb-ink); }
   .workspace-dialog { width: min(440px, calc(100% - 32px)); border: 1px solid var(--wb-line-strong); border-radius: 16px; padding: 28px; background: var(--wb-surface); color: var(--wb-text); box-shadow: 0 18px 45px rgb(15 23 42 / .14); }
