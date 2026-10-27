@@ -1,0 +1,42 @@
+src/domain/sticker.test.ts
+  s_5e55143c7b307d::t_ba83b214e3c5e4 1-193
+  s_5e55143c7b307d::t_9ffcde89724786 194
+src/domain/sticker.ts
+  s_5e55143c7b307d::t_3df6e154c5f650 1-80
+README.md
+  s_5e55143c7b307d::t_2ec93933500bcb 95,104-105,110-120,129-132,135,138
+src/app/globals.css
+  s_5e55143c7b307d::t_1286da513262f0 225-237
+src/client/idb.ts
+  s_5e55143c7b307d::t_9d9b62e2533877 26-27,51-55
+src/client/poster-renderer.ts
+  s_5e55143c7b307d::t_7d1d28948cfbf0 1-2,14,30-45,48-49,60,82-83,87
+src/client/poster-store.ts
+  s_5e55143c7b307d::t_935a4b87ef68d4 1,9-11,13-17,21,23-41
+src/client/sticker-image.ts
+  s_5e55143c7b307d::t_22ac79133cff32 1-65
+src/client/use-poster.ts
+  s_5e55143c7b307d::t_e00ad87131a75f 6-7,10-11,13-15,45,64-70,78,123-128,136,151-170,182-183
+src/components/poster-workbench.tsx
+  s_5e55143c7b307d::t_096fe19a698c14 3-4,9-10,12,17,32-38,41,56-62,69-74,78-79,83-84,91,93,100-112,117-129,132-142,155,160-161,191-199,204-208,213-233,246-247,250,253-255,262,280,292-305
+src/domain/poster.test.ts
+  s_5e55143c7b307d::t_33e37e0bb9eacc 5,42,48,52,60,64,134-136,139
+src/domain/poster.ts
+  s_5e55143c7b307d::t_124143ce0fd19a 10-11,14-15,47-57,64,104,120-122,140-143,146-169,247-260,268,273-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1d4fb28f2355a01802253881f8fb12b864e9989b",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
