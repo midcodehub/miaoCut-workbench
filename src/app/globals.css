@@ -222,6 +222,19 @@
   .poster-warning { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; font-size: 12px; line-height: 1.6; color: #b45309; }
   .poster-warning > svg { flex: none; margin-top: 3px; }
   .dark .poster-warning, .dark .poster-warn-icon { color: #fbbf24; }
+  /* 贴纸：外框随旋转角度一起转（CSS transform 绕中心），缩放把手在右下角、旋转把手在上边中点外侧。 */
+  .poster-sticker { cursor: move; }
+  .poster-sticker.is-selected { border-style: solid; }
+  .rotate-handle { position: absolute; left: 50%; top: -34px; width: 24px; height: 24px; margin-left: -12px; background: #fff; border: 1px solid #059669; border-radius: 50%; color: #047857; display: grid; place-items: center; touch-action: none; cursor: grab; }
+  .rotate-handle::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 10px; background: #059669; }
+  .poster-toolbar-actions { display: inline-flex; gap: 8px; }
+  .poster-toolbar-actions .subtle-button { padding: 6px 10px; }
+  .poster-sticker-add { margin-top: 12px; }
+  .poster-sticker-name { margin-top: 0; overflow-wrap: anywhere; }
+  .poster-slider { width: 100%; accent-color: var(--wb-green); }
+  .poster-layer-thumb { flex: none; width: 24px; height: 24px; position: relative; border-radius: 4px; overflow: hidden; background-size: 8px 8px; }
+  .poster-layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .poster-layer-main { gap: 8px; }
   /* 精确换色：画布按图片比例显示，涂抹层叠在上面；颜色走 --wb-* 令牌，深色模式自动适配。 */
   /* 透明图在棋盘格上显示，和上传区的缩略图一致（.editor-stage 的纯色背景会盖住 .checkerboard，所以这里再写一遍）。画布按图片比例显示，顶对齐，涂抹时右侧面板高度变化不会让画布跳动。 */
   .recolor-stage { width: min(100%, 600px, calc((100dvh - 305px) * var(--ratio, 1))); aspect-ratio: var(--ratio, 1); background-color: var(--wb-surface); background-image: linear-gradient(45deg, var(--wb-line) 25%, transparent 25%), linear-gradient(-45deg, var(--wb-line) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--wb-line) 75%), linear-gradient(-45deg, transparent 75%, var(--wb-line) 75%); background-size: 12px 12px; background-position: 0 0, 0 6px, 6px -6px, -6px 0; }

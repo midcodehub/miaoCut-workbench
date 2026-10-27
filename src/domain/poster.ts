@@ -7,8 +7,12 @@
  * - 一张海报最多 8 个文本框，每个最多 300 字，换行保存为真实的 "\n"。
  * - 首版只有 1:1 画幅（1024×1024）。其他画幅要等各自通过认证后再开放。
  */
+import { MAX_STICKER_DIMENSION, boxCenter, initialStickerBox, normalizeRotation, stickerBox, widthRange } from "./sticker";
+
 export const POSTER_SIZE = 1024;
 export const MAX_TEXT_LAYERS = 8;
+/** 贴纸最多 8 张，与文字框的上限分开计算。 */
+export const MAX_STICKERS = 8;
 export const MAX_TEXT_LENGTH = 300;
 /** 文本框每条边至少占画布的 6%，再小就无法拖动，也放不下一个字。 */
 export const MIN_BOX_SIZE = 0.06;
@@ -40,13 +44,24 @@ export interface TextLayer {
   kind: "text"; id: string; text: string; box: Box;
   fontId: FontId; color: string; align: TextAlign; weight: Weight;
 }
+/**
+ * 贴纸：用户上传的、带真实透明通道的图片（校验见 sticker.ts）。图片像素另存（IndexedDB，键 `sticker:<id>`），
+ * 这里只记录名称、像素尺寸（锁定宽高比）、外框和旋转，工程 JSON 因此很小。
+ * box 是**未旋转**时的外框，归一化坐标；rotation 是绕外框中心的角度（度），范围 (-180, 180]。
+ */
+export interface StickerLayer { kind: "sticker"; id: string; name: string; width: number; height: number; box: Box; rotation: number }
+/** 图层按叠放顺序存放：数组越靠后越在上面，文字和贴纸可以交错。 */
+export type PosterLayer = TextLayer | StickerLayer;
+export const isText = (layer: PosterLayer): layer is TextLayer => layer.kind === "text";
+export const isSticker = (layer: PosterLayer): layer is StickerLayer => layer.kind === "sticker";
+
 /** 背景图片的像素另存（IndexedDB），这里只记录来源和尺寸，保证工程 JSON 小而可校验。 */
 export type PosterBackground =
   | { kind: "solid"; color: string }
   | { kind: "image"; source: "upload" | "result"; name: string; width: number; height: number };
 export interface PosterDocument {
   documentId: string; revision: number; ratio: "1:1";
-  background: PosterBackground; layers: TextLayer[];
+  background: PosterBackground; layers: PosterLayer[];
 }
 
 export const emptyPoster = (documentId: string): PosterDocument =>
@@ -86,7 +101,7 @@ export function resizeBox(box: Box, x2: number, y2: number): Box {
 export function cleanText(text: string): string {
   return text.replace(/\r\n?/g, "\n").slice(0, MAX_TEXT_LENGTH);
 }
-const bump = (doc: PosterDocument, layers: TextLayer[]): PosterDocument => ({ ...doc, revision: doc.revision + 1, layers });
+const bump = (doc: PosterDocument, layers: PosterLayer[]): PosterDocument => ({ ...doc, revision: doc.revision + 1, layers });
 
 /** 按序号错开的默认位置，保证 8 个都落在画布内。 */
 export function defaultBox(index: number): Box {
@@ -102,8 +117,9 @@ export function nextBox(layers: readonly TextLayer[]): Box {
   return layers.length > 0 && y1 + 0.14 <= 0.98 ? [0.08, y1, 0.92, y1 + 0.14] : defaultBox(layers.length);
 }
 export function addText(doc: PosterDocument, id: string, text: string, overrides: Partial<Omit<TextLayer, "kind" | "id">> = {}): PosterDocument {
-  if (doc.layers.length >= MAX_TEXT_LAYERS || doc.layers.some(layer => layer.id === id)) return doc;
-  const layer: TextLayer = { kind: "text", id, text: cleanText(text), box: nextBox(doc.layers),
+  const texts = doc.layers.filter(isText);
+  if (texts.length >= MAX_TEXT_LAYERS || doc.layers.some(layer => layer.id === id)) return doc;
+  const layer: TextLayer = { kind: "text", id, text: cleanText(text), box: nextBox(texts),
     fontId: "sans", color: "#111827", align: "left", weight: 700 };
   return bump(doc, [...doc.layers, patchLayer(layer, overrides)]);
 }
@@ -121,10 +137,35 @@ const same = (a: TextLayer, b: TextLayer) => a.text === b.text && a.fontId === b
   a.align === b.align && a.weight === b.weight && a.box.every((v, i) => v === b.box[i]);
 export function updateLayer(doc: PosterDocument, id: string, patch: Partial<Omit<TextLayer, "kind" | "id">>): PosterDocument {
   const index = doc.layers.findIndex(layer => layer.id === id);
-  if (index < 0) return doc;
-  const next = patchLayer(doc.layers[index], patch);
-  if (same(next, doc.layers[index])) return doc;
+  const current = doc.layers[index];
+  if (!current || !isText(current)) return doc; // 贴纸用 updateSticker
+  const next = patchLayer(current, patch);
+  if (same(next, current)) return doc;
   return bump(doc, doc.layers.map((layer, i) => (i === index ? next : layer)));
+}
+/** 添加贴纸。超过 8 张、id 重复、尺寸不合法时原样返回同一个对象。 */
+export function addSticker(doc: PosterDocument, id: string, info: { name: string; width: number; height: number }): PosterDocument {
+  const count = doc.layers.filter(isSticker).length, { width, height } = info;
+  if (count >= MAX_STICKERS || doc.layers.some(layer => layer.id === id) || !validDimensions(width, height)) return doc;
+  const layer: StickerLayer = { kind: "sticker", id, name: info.name.slice(0, 255), width, height, box: initialStickerBox(width, height, count), rotation: 0 };
+  return bump(doc, [...doc.layers, layer]);
+}
+/**
+ * 修改贴纸的位置、大小或旋转。cx/cy 是外框中心，width 是外框宽度（都归一化）；高度由图片的宽高比决定，
+ * 所以怎么拖都不会变形。结果一定在画布内、大小在合法范围内。没有变化时原样返回同一个对象。
+ */
+export function updateSticker(doc: PosterDocument, id: string, patch: { cx?: number; cy?: number; width?: number; rotation?: number }): PosterDocument {
+  const index = doc.layers.findIndex(layer => layer.id === id), current = doc.layers[index];
+  if (!current || !isSticker(current)) return doc;
+  const placed = patch.cx !== undefined || patch.cy !== undefined || patch.width !== undefined;
+  let box = current.box;
+  if (placed) {
+    const [cx, cy] = boxCenter(current.box);
+    box = stickerBox(patch.cx ?? cx, patch.cy ?? cy, patch.width ?? current.box[2] - current.box[0], current.width / current.height);
+  }
+  const rotation = patch.rotation !== undefined ? normalizeRotation(patch.rotation) : current.rotation;
+  if (rotation === current.rotation && box.every((v, i) => Math.abs(v - current.box[i]) < 1e-9)) return doc;
+  return bump(doc, doc.layers.map((layer, i) => (i === index ? { ...current, box, rotation } : layer)));
 }
 export function removeLayer(doc: PosterDocument, id: string): PosterDocument {
   return doc.layers.some(layer => layer.id === id) ? bump(doc, doc.layers.filter(layer => layer.id !== id)) : doc;
@@ -203,7 +244,20 @@ function validBox(box: unknown): box is Box {
   return Array.isArray(box) && box.length === 4 && box.every(v => typeof v === "number" && Number.isFinite(v)) &&
     box.every(v => v >= 0 && v <= 1) && box[2] - box[0] >= MIN_BOX_SIZE - 1e-9 && box[3] - box[1] >= MIN_BOX_SIZE - 1e-9;
 }
-function validLayer(layer: TextLayer): boolean {
+const validDimensions = (width: number, height: number) =>
+  [width, height].every(n => Number.isSafeInteger(n) && n > 0 && n <= MAX_STICKER_DIMENSION);
+function validSticker(layer: StickerLayer): boolean {
+  const { box } = layer;
+  if (typeof layer.id !== "string" || layer.id.length === 0 || layer.id.length > 64 || typeof layer.name !== "string" || layer.name.length > 255 ||
+    !validDimensions(layer.width, layer.height) || typeof layer.rotation !== "number" || !Number.isFinite(layer.rotation) ||
+    layer.rotation <= -180 || layer.rotation > 180) return false;
+  if (!Array.isArray(box) || box.length !== 4 || !box.every(v => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1) || box[2] <= box[0] || box[3] <= box[1]) return false;
+  // 外框的宽高比必须与图片一致，宽度在合法范围内：损坏或被篡改的记录不会让贴纸变形。
+  const w = box[2] - box[0], h = box[3] - box[1], aspect = layer.width / layer.height, [lo, hi] = widthRange(aspect);
+  return Math.abs(w / h - aspect) <= aspect * 0.01 && w >= lo - 1e-6 && w <= hi + 1e-6;
+}
+function validLayer(layer: PosterLayer): boolean {
+  if (layer && layer.kind === "sticker") return validSticker(layer);
   return !!layer && layer.kind === "text" && typeof layer.id === "string" && layer.id.length > 0 && layer.id.length <= 64 &&
     typeof layer.text === "string" && layer.text.length <= MAX_TEXT_LENGTH && !layer.text.includes("\r") && validBox(layer.box) &&
     layer.fontId in FONTS && COLOR.test(layer.color) && ["left", "center", "right"].includes(layer.align) && (layer.weight === 400 || layer.weight === 700);
@@ -211,10 +265,11 @@ function validLayer(layer: TextLayer): boolean {
 export function validPoster(value: unknown): value is PosterDocument {
   const doc = value as PosterDocument;
   if (!doc || typeof doc !== "object" || !UUID.test(doc.documentId) || !Number.isSafeInteger(doc.revision) || doc.revision < 0 ||
-    doc.ratio !== "1:1" || !Array.isArray(doc.layers) || doc.layers.length > MAX_TEXT_LAYERS) return false;
+    doc.ratio !== "1:1" || !Array.isArray(doc.layers) || doc.layers.length > MAX_TEXT_LAYERS + MAX_STICKERS) return false;
   const bg = doc.background;
   if (!bg || (bg.kind === "solid" ? !COLOR.test(bg.color) :
     bg.kind !== "image" || !["upload", "result"].includes(bg.source) || typeof bg.name !== "string" || bg.name.length > 255 ||
     ![bg.width, bg.height].every(n => Number.isSafeInteger(n) && n > 0 && n <= 8192))) return false;
-  return doc.layers.every(validLayer) && new Set(doc.layers.map(layer => layer.id)).size === doc.layers.length;
+  return doc.layers.every(validLayer) && new Set(doc.layers.map(layer => layer.id)).size === doc.layers.length &&
+    doc.layers.filter(isText).length <= MAX_TEXT_LAYERS && doc.layers.filter(isSticker).length <= MAX_STICKERS;
 }

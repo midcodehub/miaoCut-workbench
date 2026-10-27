@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Locale } from "@/domain/contracts";
 import {
-  addText, emptyPoster, moveLayer, removeLayer, setBackground, updateLayer, MAX_TEXT_LAYERS,
-  type PosterDocument, type TextLayer,
+  addSticker as addStickerLayer, addText, emptyPoster, isSticker, isText, moveLayer, removeLayer, setBackground, updateLayer, updateSticker,
+  MAX_STICKERS, MAX_TEXT_LAYERS, type PosterDocument, type TextLayer,
 } from "@/domain/poster";
 import { AssetError, imageFromUrl } from "./assets";
-import { MAX_BACKGROUND_BYTES, clearHandoff, readHandoff, readPoster, savePoster } from "./poster-store";
+import { MAX_BACKGROUND_BYTES, clearHandoff, pruneStickers, readHandoff, readPoster, removeSticker, savePoster, saveSticker } from "./poster-store";
+import { StickerError, decodeSticker, loadSticker, makeSampleSticker } from "./sticker-image";
 
-export type PosterNotice = "storage_error" | "file_type" | "file_size" | "image_size" | "image_decode" | null;
+export type PosterNotice = "storage_error" | "file_type" | "file_size" | "image_size" | "image_decode" | "sticker_file_type" | "sticker_no_alpha" | "sticker_empty" | "sticker_limit" | null;
+/** 一张贴纸的图片：原始文件（用于缩略图）和解码好的图片元素（用于绘制）。 */
+export interface StickerAsset { blob: Blob; image: HTMLImageElement }
 const UPLOAD_LIMIT = 10 * 1024 * 1024;
 
 /** 解码图片取得真实尺寸，同时校验类型、字节数和像素数。 */
@@ -39,6 +42,7 @@ export function usePoster() {
   const [{ doc, selectedId }, setState] = useState<{ doc: PosterDocument; selectedId: string | null }>(
     () => ({ doc: emptyPoster(crypto.randomUUID()), selectedId: null }));
   const [background, setBackgroundBlob] = useState<Blob>();
+  const [stickers, setStickers] = useState<ReadonlyMap<string, StickerAsset>>(() => new Map());
   const [loaded, setLoaded] = useState<{ blob: Blob; image: HTMLImageElement }>();
   const [ready, setReady] = useState(false), [fromResult, setFromResult] = useState(false);
   const [locale, setLocaleState] = useState<Locale>("zh"), [dark, setDark] = useState(false);
@@ -57,6 +61,13 @@ export function usePoster() {
       try { stored = localStorage.getItem("mc.workbench.locale") ?? localStorage.getItem("lang"); } catch { /* 语言偏好是可选的 */ }
       const initialLocale: Locale = stored === "en" ? "en" : "zh";
       let next = saved?.doc ?? starter(initialLocale), blob = saved?.background, applied: number | null = null;
+      // 贴纸：像素解码失败的整张去掉；清理没有被工程引用的像素记录（此时用户还不能操作，不会误删刚添加的）。
+      const assets = new Map<string, StickerAsset>();
+      for (const [id, stickerBlob] of saved?.stickers ?? []) {
+        try { assets.set(id, { blob: stickerBlob, image: await decodeSticker(stickerBlob) }); } catch { /* 无法解码的贴纸从工程里去掉 */ }
+      }
+      if (next.layers.some(layer => isSticker(layer) && !assets.has(layer.id))) next = { ...next, layers: next.layers.filter(layer => !isSticker(layer) || assets.has(layer.id)) };
+      if (!storageFailed) { try { await pruneStickers(new Set(assets.keys())); } catch { /* 清理失败不影响使用，下次启动再试 */ } }
       if (handoff) {
         try {
           const size = await inspectImage(handoff.blob, MAX_BACKGROUND_BYTES);
@@ -64,7 +75,7 @@ export function usePoster() {
         } catch { /* 带过来的图片无法使用：保留原来的背景 */ }
       }
       if (!active) return;
-      setState({ doc: next, selectedId: next.layers[0]?.id ?? null }); setBackgroundBlob(blob);
+      setState({ doc: next, selectedId: next.layers[0]?.id ?? null }); setBackgroundBlob(blob); setStickers(assets);
       appliedHandoff.current = applied; setFromResult(applied !== null); setLocaleState(initialLocale); document.documentElement.lang = initialLocale === "zh" ? "zh-CN" : "en";
       setDark(document.documentElement.classList.contains("dark"));
       if (storageFailed) setNotice("storage_error");
@@ -109,6 +120,12 @@ export function usePoster() {
   }, [locale]);
   const patchLayer = useCallback((id: string, patch: Partial<Omit<TextLayer, "kind" | "id">>) => change(current => updateLayer(current, id, patch)), [change]);
   const deleteLayer = useCallback((id: string) => {
+    const target = doc.layers.find(layer => layer.id === id);
+    if (target && isSticker(target)) {
+      // 贴纸的像素和图层一起删除（先从界面移除，再清理存储；清理失败只会留下一条下次启动时被清掉的记录）。
+      setStickers(current => { const next = new Map(current); next.delete(id); return next; });
+      void removeSticker(id).catch(() => undefined);
+    }
     setState(state => {
       const index = state.doc.layers.findIndex(layer => layer.id === id), next = removeLayer(state.doc, id);
       if (next === state.doc) return state;
@@ -116,7 +133,7 @@ export function usePoster() {
       const selectedId = state.selectedId !== id ? state.selectedId : next.layers[Math.min(index, next.layers.length - 1)]?.id ?? null;
       return { doc: next, selectedId };
     });
-  }, []);
+  }, [doc]);
   const reorder = useCallback((id: string, direction: "up" | "down") => change(current => moveLayer(current, id, direction)), [change]);
   const select = useCallback((id: string | null) => setState(state => (state.selectedId === id ? state : { ...state, selectedId: id })), []);
   const setColor = useCallback((color: string) => {
@@ -131,6 +148,26 @@ export function usePoster() {
     } catch (error) { setNotice(error instanceof AssetError ? error.code : "image_decode"); }
   }, [change]);
 
+  // 添加贴纸：先校验并解码，再把像素写进存储，最后才让工程引用它。存储失败时仍可在本次编辑中使用（提示无法保存）。
+  const addStickerFile = useCallback(async (file: File) => {
+    setNotice(null);
+    if (doc.layers.filter(isSticker).length >= MAX_STICKERS) { setNotice("sticker_limit"); return; }
+    try {
+      const { image, width, height } = await loadSticker(file), id = crypto.randomUUID();
+      try { await saveSticker(id, file); } catch { setNotice("storage_error"); }
+      setStickers(current => new Map(current).set(id, { blob: file, image }));
+      setState(state => {
+        const next = addStickerLayer(state.doc, id, { name: file.name, width, height });
+        return next === state.doc ? state : { doc: next, selectedId: id };
+      });
+    } catch (error) { setNotice(error instanceof StickerError ? (error.code === "file_type" ? "sticker_file_type" : error.code) : "image_decode"); }
+  }, [doc]);
+  const addSampleSticker = useCallback(async () => {
+    try { await addStickerFile(await makeSampleSticker()); } catch { setNotice("image_decode"); }
+  }, [addStickerFile]);
+  const patchSticker = useCallback((id: string, patch: { cx?: number; cy?: number; width?: number; rotation?: number }) =>
+    change(current => updateSticker(current, id, patch)), [change]);
+
   const setLocale = (value: Locale) => {
     setLocaleState(value); document.documentElement.lang = value === "zh" ? "zh-CN" : "en";
     try { localStorage.setItem("mc.workbench.locale", value); } catch { /* 偏好是可选的 */ }
@@ -142,5 +179,6 @@ export function usePoster() {
   const selected = useMemo(() => doc.layers.find(layer => layer.id === selectedId) ?? null, [doc.layers, selectedId]);
   return { doc, image, background, ready, fromResult, dismissFromResult: () => setFromResult(false), notice, dismissNotice: () => setNotice(null),
     locale, setLocale, dark, toggleTheme, selectedId, selected, select, addLayer, patchLayer, deleteLayer, reorder,
-    setColor, uploadBackground, canAdd: doc.layers.length < MAX_TEXT_LAYERS };
+    setColor, uploadBackground, canAdd: doc.layers.filter(isText).length < MAX_TEXT_LAYERS,
+    stickers, addStickerFile, addSampleSticker, patchSticker, canAddSticker: doc.layers.filter(isSticker).length < MAX_STICKERS };
 }
