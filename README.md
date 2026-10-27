@@ -4,7 +4,7 @@
 
 Independent Next.js product-scene workbench with a local demo, an internal API route, and free/AI result comparison. Split out of midcodehub/miaoCut, whose root is published as static files and cannot host a Next app with server routes. The backend lives in a private repository.
 
-`/workbench/poster`是免费的海报文字编辑器（见下文“海报文字”），`/workbench/recolor`是免费的精确换色（见下文“精确换色”）。`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成使用`src/vendor/editor/`里的旧站编辑器引擎副本（原文件、来源 commit 和更新方法见该目录 README）。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
+`/workbench/poster`是免费的海报文字编辑器（见下文“海报文字”），`/workbench/recolor`是免费的精确换色（见下文“精确换色”），`/workbench/batch`是内部测试环境的批量场景（见下文“批量场景”）。`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成使用`src/vendor/editor/`里的旧站编辑器引擎副本（原文件、来源 commit 和更新方法见该目录 README）。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
 
 ## 启动 / Run
 
@@ -183,6 +183,37 @@ No image upload or render-job API is called. This mode must remain clearly label
 | `src/components/recolor-workbench.tsx` | 页面：画笔叠加层、颜色卡片、导出 |
 
 当前没有做：按颜色相似度限制范围（涂到的都会换，包括不想换的背景或别的颜色，所以需要涂得准）、“只涂商品内”（没有前景资产）、一次下载全部颜色（ZIP）、AI 换色（深浅跨度很大或需要重新渲染光影时）。涂抹需要鼠标、触控笔或手指，没有键盘涂抹方式；触屏上手指落在图上是涂抹而不是滚动。带不透明度的半透明像素在 Canvas 里是预乘存储，保存回来可能有 ±1 的舍入，完全不透明的图不受影响。带色彩配置文件的图会被浏览器先转成 sRGB，导出的 PNG 不带配置文件。Safari 和 Firefox 没有测过。
+
+## 批量场景 / Batch scenes（`/workbench/batch`）
+
+一次放进最多 20 件商品：逐张上传并提取主体（内测期间免费）、检查主体、选一个整批共享的方案、自动算出每件商品的构图、确认预算，然后在服务端批量生成，页面显示每件商品的状态，最后下载 ZIP。**和内部工作台一样依赖账户登录和积分账本，只在 `WORKBENCH_INTERNAL_ENABLED=1` 的内部测试环境开放**；不计费的内部模式下页面只显示说明（服务端能力接口里 `batch` 为 `null`）。
+
+| 步骤 | 行为 |
+|---|---|
+| 添加 | 拖入或选择 PNG/JPG/WebP（每张 ≤10 MB、每边 ≤4096 px），最多 20 件。上传最多 3 件同时进行；“提取主体”任务最多同时提交 2 个（账户同时最多 3 笔冻结，留 1 个给其他操作），其余排队 |
+| 主体检查 | 提取完成后，浏览器读取前景的 Alpha（缩小到长边 ≤256）算三个指标：主体面积占比（<2% 或 >95%）、可见包围盒贴住两条以上图像边、面积 >1% 的连通块多于 3 个。命中任何一条标为“可疑”并说明原因，**不会自动排除**，用户可以排除、替换原图或照用 |
+| 方案 | 场景（大理石 / 原木 / 极简几何）、主体大小（小 / 中 / 大 = 0.45 / 0.60 / 0.75）、位置（底部落地 / 居中）、文字留白（无 / 左 / 右 / 上）；画幅只开放 1:1，其余灰显“待开放” |
+| 自动放置 | `placeSubject`（`src/domain/batch.ts`）：画布减去留白区和 2% 边距得到可用区域，在“可用区域短边 × 主体大小”的方框里按主体可见包围盒的宽高比等比放入，再按位置约束。每件商品一个构图，矩阵里的预览就是实际提交的构图 |
+| 预算 | **点“确认预算”时才报价**（报价 5 分钟有效，检查主体的时候不会创建报价）。显示“N 件 · 最多 X 积分 · 当前可用 Y”；确认后才提交。只在每件商品生成成功后扣减，同一批最多同时预留 2 件 |
+| 状态矩阵 | 每件商品：等待 / 已排队 / 正在生成 / 正在保存 / 已完成 / 失败 / 等待积分 / 已停止 / 已排除；汇总“完成 · 生成中 · 排队 · 等待 · 失败 · 排除 · 已用 / 预算”。每 2 秒轮询，没有会自己变化的项时停止 |
+| 离开页面 | 确认前先把 groupId 存进本地，确认请求按 groupId + 内容幂等：刷新后继续，不会建第二批、不会再冻结积分。批次在服务端继续执行 |
+| 停止 / 继续 | “停止剩余”：排队中的释放积分，正在生成的继续完成并结算。余额不足时批次自动暂停（等待积分），补充后点“继续” |
+| 重新生成失败项 | 用失败的几项（沿用原来的场景和构图）再提交一个**新批次**：新的报价、新的订单；成功项保留（页面最多同时记住 5 个批次，同一件商品在任何批次里成功过就显示成功） |
+| ZIP | 在浏览器里用 fflate 打包已完成的结果（只存储不压缩，PNG 本来就压缩过），文件名 `<原文件名>_<场景>_<画幅>.png`，画幅里的冒号换成 x，重名（不分大小写）加 `-2`、`-3`。服务器不额外存一份 |
+| 已提交的商品 | 属于某个批次的商品不能再排除、替换、移除（结果要和它们对上）；“开始新的一批”清空商品和已记住的批次 |
+
+**保存：** 商品记录、方案和批次（groupId 与提交的请求）存在 localStorage（`mc.workbench.batch.v1.<sessionKey>.<authUserId>`），读回时先过 `validBatchDraft` 校验，损坏的记录不会变成服务请求。上传中的商品不保存（文件刷新后就没了）；提取中的商品按保存的任务继续查询，不重复提交。
+
+| 位置 / Path | 职责 / Responsibility |
+|---|---|
+| `src/domain/batch.ts` | 主体检查、自动放置、请求构造、状态汇总与“显示哪个批次的结果”、ZIP 命名与打包、本地记录校验。纯函数，不碰 DOM |
+| `src/domain/batch.test.ts` | 上述逻辑的单元测试 |
+| `src/domain/service-contracts.ts` | 批量请求、报价、批次视图的类型 |
+| `src/client/use-batch.ts` | 页面状态：上传与提取调度、轮询、报价与确认、停止 / 继续、重新生成、下载 |
+| `src/client/service-api.ts` | 批量使用与四候选相同的一组接口（`group-quotes`、`groups`），请求里 `kind` 为 `batch` |
+| `src/components/batch-workbench.tsx`、`src/app/batch/page.tsx` | 页面（受 `WORKBENCH_INTERNAL_ENABLED` 控制） |
+
+当前没有做：画幅 3:4 / 9:16 / 16:9（要等各自通过认证）、单张微调构图、“用户主动暂停”（只有取消剩余和余额不足的被动暂停）、跨设备找回批次（服务端没有“列出我的批次”的接口，目前只能凭本地保存的 groupId）、预计剩余时间（只显示“单张约 1～2 分钟”的说明）、通知。
 
 ## 内部 API 联调入口 / Internal API route
 

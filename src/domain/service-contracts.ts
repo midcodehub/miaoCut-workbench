@@ -53,3 +53,19 @@ export interface ServiceGroup {
   budgetUnits: number; unitUnits: number; settledUnits: number; heldUnits: number;
   pricingVersion: string; createdAt: number; items: ServiceGroupItem[];
 }
+
+/**
+ * 批量请求（设计 §4）：每件商品一项，每项带自己的素材和构图。浏览器只决定“提交哪些商品、各自的构图”，
+ * 价格、派发顺序和每个工作项的 requestId 都由服务端决定。被排除的商品不放进 entries，所以不产生订单。
+ */
+export interface ServiceBatchEntry extends ServiceGroupItemTemplate { entryId: string }
+export interface ServiceBatchRequest { version: 1; requestId: string; kind: "batch"; entries: ServiceBatchEntry[] }
+/** 批量报价不回显请求（有几十 KB）：页面保存着自己提交的那份，确认时原样再发一次。 */
+export interface ServiceBatchQuote {
+  groupId: string; kind: "batch"; units: number; unitUnits: number; count: number; pricingVersion: string; expiresAt: number; availableCredits: number;
+}
+export interface ServiceBatchItem extends ServiceGroupItem { entryId: string }
+/** 批量组视图：与候选组相同的预算与状态字段，但带 entryIds，不重复返回请求。 */
+export interface ServiceBatch extends Omit<ServiceGroup, "kind" | "request" | "items"> {
+  kind: "batch"; entryIds: string[]; items: ServiceBatchItem[];
+}

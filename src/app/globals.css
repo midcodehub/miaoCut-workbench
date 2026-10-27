@@ -266,6 +266,48 @@
   .recolor-preset { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--wb-line-strong); }
   .recolor-preset:disabled { opacity: .3; cursor: default; }
   @media (hover: none) { .recolor-variant-actions { opacity: 1; } }
+  /* 批量场景：左边是商品矩阵（上传、主体检查、构图预览、状态、操作），右边是方案和预算。颜色走 --wb-* 令牌，深色模式自动适配。 */
+  .batch-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+  .batch-count { font-size: 12px; color: var(--wb-muted); font-variant-numeric: tabular-nums; }
+  .batch-drop { min-height: 96px; margin-top: 12px; }
+  .batch-drop:disabled { opacity: .55; cursor: default; }
+  .batch-table { margin-top: 14px; display: grid; border: 1px solid var(--wb-line); border-radius: 9px; overflow: hidden; }
+  .batch-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(130px, 1.2fr) minmax(130px, 1.2fr) auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--wb-surface); }
+  .batch-row + .batch-row { border-top: 1px solid var(--wb-line); }
+  .batch-head { background: var(--wb-bg); font-size: 11px; color: var(--wb-muted); font-weight: 550; padding-top: 7px; padding-bottom: 7px; }
+  .batch-row.is-excluded .batch-file, .batch-row.is-excluded .batch-result { opacity: .5; }
+  .batch-file { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .batch-thumb { flex: none; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; position: relative; background-size: 8px 8px; }
+  .batch-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .batch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--wb-ink); }
+  .batch-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+  .batch-reason { font-size: 11px; line-height: 1.5; color: #b45309; }
+  .dark .batch-reason { color: #fbbf24; }
+  .batch-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--wb-text); }
+  .batch-status.is-ok { color: var(--wb-green); } .batch-status.is-warn { color: #b45309; } .batch-status.is-bad { color: #dc2626; } .batch-status.is-muted { color: var(--wb-muted); } .batch-status.is-busy { color: var(--wb-text); }
+  .dark .batch-status.is-warn { color: #fbbf24; } .dark .batch-status.is-bad { color: #f87171; }
+  .batch-result { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .batch-result-image { flex: none; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; position: relative; background-size: 8px 8px; display: grid; place-items: center; }
+  .batch-result-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .batch-result-empty { background: var(--wb-bg); border: 1px dashed var(--wb-line-strong); }
+  .batch-tile { flex: none; position: relative; display: block; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; border: 1px solid var(--wb-line); }
+  .batch-tile-subject { position: absolute; display: block; overflow: hidden; }
+  .batch-tile-subject img { position: absolute; max-width: none; }
+  .batch-actions { display: flex; align-items: center; gap: 2px; justify-content: flex-end; }
+  .batch-actions .icon-button { width: 28px; height: 28px; }
+  .batch-actions .icon-button:disabled { opacity: .35; cursor: default; }
+  .batch-progress { border-top: 1px solid var(--wb-line); }
+  .batch-summary { margin-top: 10px; font-size: 13px; line-height: 1.8; color: var(--wb-text); font-variant-numeric: tabular-nums; }
+  .batch-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .batch-buttons .primary-button, .batch-buttons .secondary-button { width: auto; min-width: 0; padding-left: 14px; padding-right: 14px; }
+  .batch-buttons .sample-button { width: auto; margin-top: 0; padding: 0 14px; }
+  .batch-scenes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .batch-scenes .scene-card { flex-direction: column; padding: 6px; gap: 4px; min-width: 0; }
+  .batch-scenes .scene-thumbnail { width: 100%; height: 36px; }
+  .batch-offer-line { margin-top: 2px; }
+  .batch-budget p { margin-top: 8px; font-size: 13px; }
+  .batch-budget .primary-button { margin-top: 12px; }
+  .batch-budget .sample-button { margin-top: 8px; }
   .workspace-footer { padding: 16px 1px 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--wb-muted); }.workspace-footer > span > span { color: var(--wb-line-strong); padding: 0 5px; }
   .workspace-footer button { display: flex; align-items: center; gap: 5px; padding: 3px 0; background: none; border: 0; color: var(--wb-muted); font-size: 12px; }.workspace-footer button:hover { color: var(--wb-ink); }
   .workspace-dialog { width: min(440px, calc(100% - 32px)); border: 1px solid var(--wb-line-strong); border-radius: 16px; padding: 28px; background: var(--wb-surface); color: var(--wb-text); box-shadow: 0 18px 45px rgb(15 23 42 / .14); }
@@ -379,4 +421,15 @@
 /* 精确换色在手机上：先看到要涂抹的图，工具和颜色放在下面（单列布局时才需要调整顺序）。 */
 @media (max-width: 640px) {
   .recolor-app .canvas-panel { order: -1; }
+}
+
+/* 批量场景在窄屏：方案和预算放到商品下面；商品矩阵的每一行改成两列，操作按钮单独一行。 */
+@media (max-width: 940px) {
+  .batch-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .batch-head { display: none; }
+  .batch-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); row-gap: 8px; }
+  .batch-file { grid-column: 1 / -1; }
+  .batch-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }
