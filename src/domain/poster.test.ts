@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_TEXT_LAYERS, MAX_TEXT_LENGTH, MIN_BOX_SIZE, addText, cleanText, defaultBox, emptyPoster, fitText, moveBox, moveLayer, normalizeBox,
-  nextBox, removeLayer, resizeBox, setBackground, updateLayer, validPoster, wrapText, type Measure, type PosterDocument,
+  nextBox, removeLayer, resizeBox, setBackground, updateLayer, validPoster, wrapText, type Measure, type PosterDocument, type TextLayer,
 } from "./poster";
 
 // 确定的假度量：中日韩字符宽 1em，其余 0.6em，空格 0.3em。不依赖浏览器字体，结果可重复。
@@ -39,17 +39,17 @@ test("addText places up to eight boxes inside the canvas, and refuses the ninth 
   assert.equal(doc.layers.length, MAX_TEXT_LAYERS); assert.equal(doc.revision, MAX_TEXT_LAYERS);
   assert.equal(addText(doc, "ninth", "x"), doc, "the ninth box returns the same document");
   assert.equal(addText(withLayers(1), "layer-0", "dup").layers.length, 1, "duplicate ids are refused");
-  const shown = addText(fresh(), "z", "a\r\nb", { color: "#ff0000", weight: 400 }); assert.equal(shown.layers[0].text, "a\nb"); assert.equal(shown.layers[0].color, "#FF0000");
+  const shown = addText(fresh(), "z", "a\r\nb", { color: "#ff0000", weight: 400 }); assert.equal((shown.layers[0] as TextLayer).text, "a\nb"); assert.equal((shown.layers[0] as TextLayer).color, "#FF0000");
 });
 
 test("a new box goes below the existing ones; when there is no room it falls back inside the canvas", () => {
   let doc = addText(fresh(), "title", "t", { box: [0.08, 0.08, 0.92, 0.24] });
   doc = addText(doc, "sub", "s", { box: [0.08, 0.26, 0.7, 0.4] });
-  const placed = nextBox(doc.layers);
+  const placed = nextBox(doc.layers as TextLayer[]);
   assert.ok(Math.abs(placed[1] - 0.42) < 1e-9, "starts 0.02 below the lowest existing box");
   assert.ok(doc.layers.every(layer => placed[1] >= layer.box[3]), "does not overlap any existing box");
   const crowded = addText(doc, "low", "x", { box: [0.08, 0.84, 0.92, 0.98] });
-  const fallback = nextBox(crowded.layers);
+  const fallback = nextBox(crowded.layers as TextLayer[]);
   assert.deepEqual(fallback, defaultBox(crowded.layers.length)); assert.ok(inside(fallback), "fallback stays inside the canvas");
   assert.deepEqual(nextBox([]), defaultBox(0), "the first box uses the default slot");
 });
@@ -57,11 +57,11 @@ test("a new box goes below the existing ones; when there is no room it falls bac
 test("updateLayer validates input, ignores no-ops and unknown ids", () => {
   const doc = withLayers(2), id = doc.layers[0].id;
   assert.equal(updateLayer(doc, "missing", { text: "x" }), doc);
-  assert.equal(updateLayer(doc, id, { text: doc.layers[0].text }), doc, "no change keeps the same object and revision");
+  assert.equal(updateLayer(doc, id, { text: (doc.layers[0] as TextLayer).text }), doc, "no change keeps the same object and revision");
   const bad = updateLayer(doc, id, { color: "red", fontId: "comic" as never, align: "justify" as never, weight: 500 as never });
   assert.equal(bad, doc, "invalid fields are ignored");
   const longText = "字".repeat(MAX_TEXT_LENGTH + 50), next = updateLayer(doc, id, { text: longText });
-  assert.equal(next.layers[0].text.length, MAX_TEXT_LENGTH); assert.equal(next.revision, doc.revision + 1);
+  assert.equal((next.layers[0] as TextLayer).text.length, MAX_TEXT_LENGTH); assert.equal(next.revision, doc.revision + 1);
   assert.equal(cleanText("a\r\nb\rc"), "a\nb\nc");
   assert.ok(inside(updateLayer(doc, id, { box: [-5, -5, 0, 0] }).layers[0].box), "boxes are normalized on update");
   assert.equal(next.layers[1], doc.layers[1], "other layers are untouched");
@@ -131,12 +131,12 @@ test("stored poster records survive a JSON round trip but corrupt ones are rejec
   assert.equal(bad(d => { (d as { ratio: string }).ratio = "3:4"; }), false, "only 1:1 is open");
   assert.equal(bad(d => { d.layers[0].box = [0.5, 0.5, 0.51, 0.51]; }), false, "below the minimum box size");
   assert.equal(bad(d => { d.layers[0].box = [0, 0, 2, 1]; }), false);
-  assert.equal(bad(d => { d.layers[0].color = "blue"; }), false);
-  assert.equal(bad(d => { d.layers[0].text = "x".repeat(MAX_TEXT_LENGTH + 1); }), false);
-  assert.equal(bad(d => { d.layers[0].text = "a\r\nb"; }), false, "CRLF is normalized before it is ever stored");
+  assert.equal(bad(d => { (d.layers[0] as TextLayer).color = "blue"; }), false);
+  assert.equal(bad(d => { (d.layers[0] as TextLayer).text = "x".repeat(MAX_TEXT_LENGTH + 1); }), false);
+  assert.equal(bad(d => { (d.layers[0] as TextLayer).text = "a\r\nb"; }), false, "CRLF is normalized before it is ever stored");
   assert.equal(bad(d => { d.layers[1].id = d.layers[0].id; }), false, "duplicate ids");
   assert.equal(bad(d => { d.layers = Array.from({ length: MAX_TEXT_LAYERS + 1 }, (_, i) => ({ ...d.layers[0], id: `extra-${i}` })); }), false, "more than eight layers (built by hand, addText would refuse)");
-  assert.equal(bad(d => { d.layers[0].fontId = "comic" as never; }), false);
+  assert.equal(bad(d => { (d.layers[0] as TextLayer).fontId = "comic" as never; }), false);
   assert.equal(bad(d => { (d.background as { width: number }).width = 0; }), false);
   assert.equal(bad(d => { d.background = { kind: "solid", color: "#12" }; }), false);
 });

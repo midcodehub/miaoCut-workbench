@@ -222,6 +222,50 @@
   .poster-warning { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; font-size: 12px; line-height: 1.6; color: #b45309; }
   .poster-warning > svg { flex: none; margin-top: 3px; }
   .dark .poster-warning, .dark .poster-warn-icon { color: #fbbf24; }
+  /* 贴纸：外框随旋转角度一起转（CSS transform 绕中心），缩放把手在右下角、旋转把手在上边中点外侧。 */
+  .poster-sticker { cursor: move; }
+  .poster-sticker.is-selected { border-style: solid; }
+  .rotate-handle { position: absolute; left: 50%; top: -34px; width: 24px; height: 24px; margin-left: -12px; background: #fff; border: 1px solid #059669; border-radius: 50%; color: #047857; display: grid; place-items: center; touch-action: none; cursor: grab; }
+  .rotate-handle::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 10px; background: #059669; }
+  .poster-toolbar-actions { display: inline-flex; gap: 8px; }
+  .poster-toolbar-actions .subtle-button { padding: 6px 10px; }
+  .poster-sticker-add { margin-top: 12px; }
+  .poster-sticker-name { margin-top: 0; overflow-wrap: anywhere; }
+  .poster-slider { width: 100%; accent-color: var(--wb-green); }
+  .poster-layer-thumb { flex: none; width: 24px; height: 24px; position: relative; border-radius: 4px; overflow: hidden; background-size: 8px 8px; }
+  .poster-layer-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .poster-layer-main { gap: 8px; }
+  /* 精确换色：画布按图片比例显示，涂抹层叠在上面；颜色走 --wb-* 令牌，深色模式自动适配。 */
+  /* 透明图在棋盘格上显示，和上传区的缩略图一致（.editor-stage 的纯色背景会盖住 .checkerboard，所以这里再写一遍）。画布按图片比例显示，顶对齐，涂抹时右侧面板高度变化不会让画布跳动。 */
+  .recolor-stage { width: min(100%, 600px, calc((100dvh - 305px) * var(--ratio, 1))); aspect-ratio: var(--ratio, 1); background-color: var(--wb-surface); background-image: linear-gradient(45deg, var(--wb-line) 25%, transparent 25%), linear-gradient(-45deg, var(--wb-line) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--wb-line) 75%), linear-gradient(-45deg, transparent 75%, var(--wb-line) 75%); background-size: 12px 12px; background-position: 0 0, 0 6px, 6px -6px, -6px 0; }
+  .recolor-app .canvas-space { align-content: start; }
+  .recolor-overlay { position: absolute; inset: 0; z-index: 1; touch-action: none; cursor: crosshair; transition: opacity 120ms; }
+  .recolor-cursor { position: absolute; z-index: 2; display: none; pointer-events: none; border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .6); transform: translate(-50%, -50%); }
+  .recolor-hint { position: absolute; left: 50%; bottom: 14px; z-index: 2; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: 999px; background: rgb(17 24 39 / .78); color: #fff; font-size: 12px; pointer-events: none; text-align: center; }
+  .recolor-tools .poster-segment button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+  .recolor-slider { width: 100%; accent-color: var(--wb-green); }
+  .recolor-history { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .recolor-history .subtle-button:disabled, .recolor-tools .sample-button:disabled, .recolor-variant-actions .icon-button:disabled { opacity: .4; cursor: default; }
+  .recolor-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--wb-text); cursor: pointer; }
+  .recolor-toggle input { accent-color: var(--wb-green); }
+  .recolor-status { display: inline-flex; align-items: center; gap: 5px; }
+  .recolor-count { font-size: 11px; color: var(--wb-muted); font-variant-numeric: tabular-nums; }
+  .recolor-variants { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; list-style: none; padding: 0; }
+  .recolor-variant { position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 9px; background: var(--wb-surface); overflow: hidden; }
+  .recolor-variant.is-selected { border-color: var(--wb-accent); box-shadow: 0 0 0 1px var(--wb-accent); }
+  .recolor-variant-main { display: block; width: 100%; padding: 0; background: none; border: 0; text-align: left; color: var(--wb-text); }
+  .recolor-thumb { display: block; aspect-ratio: 1; overflow: hidden; }
+  .recolor-thumb > canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
+  .recolor-variant-meta { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 6px 8px; font-size: 11px; }
+  .recolor-variant-meta code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .recolor-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--wb-line-strong); }
+  .recolor-variant-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
+  .recolor-variant:hover .recolor-variant-actions, .recolor-variant:focus-within .recolor-variant-actions { opacity: 1; }
+  .recolor-variant-actions .icon-button { width: 24px; height: 24px; background: rgb(255 255 255 / .88); color: #374151; }
+  .recolor-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .recolor-preset { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--wb-line-strong); }
+  .recolor-preset:disabled { opacity: .3; cursor: default; }
+  @media (hover: none) { .recolor-variant-actions { opacity: 1; } }
   .workspace-footer { padding: 16px 1px 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--wb-muted); }.workspace-footer > span > span { color: var(--wb-line-strong); padding: 0 5px; }
   .workspace-footer button { display: flex; align-items: center; gap: 5px; padding: 3px 0; background: none; border: 0; color: var(--wb-muted); font-size: 12px; }.workspace-footer button:hover { color: var(--wb-ink); }
   .workspace-dialog { width: min(440px, calc(100% - 32px)); border: 1px solid var(--wb-line-strong); border-radius: 16px; padding: 28px; background: var(--wb-surface); color: var(--wb-text); box-shadow: 0 18px 45px rgb(15 23 42 / .14); }
@@ -330,4 +374,9 @@
   .internal-workbench .asset-thumbnail { width: 88px; height: 68px; flex: none; }
   .internal-workbench .asset-panel .control-help { font-size: 12px; line-height: 1.6; }
   .internal-workbench .scene-card > strong { font-size: 12px; text-align: center; }
+}
+
+/* 精确换色在手机上：先看到要涂抹的图，工具和颜色放在下面（单列布局时才需要调整顺序）。 */
+@media (max-width: 640px) {
+  .recolor-app .canvas-panel { order: -1; }
 }
