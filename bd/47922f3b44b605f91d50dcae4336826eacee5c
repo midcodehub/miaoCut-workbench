@@ -1,0 +1,42 @@
+src/components/batch-workbench.tsx
+  s_5e55143c7b307d::t_1e7f16c4bf6c44 1-258
+src/client/use-batch.ts
+  s_5e55143c7b307d::t_98867526027824 1-424,427-428
+  s_5e55143c7b307d::t_7a377580cdeccd 425-426,429-437
+README.md
+  s_5e55143c7b307d::t_993de666575269 7,187-217
+package-lock.json
+  s_5e55143c7b307d::t_4f46625c1b15ad 12,4250-4255
+package.json
+  s_5e55143c7b307d::t_1ba2d2c0575488 16
+src/app/batch/page.tsx
+  s_5e55143c7b307d::t_7c4c644dab9418 1-10
+src/app/globals.css
+  s_5e55143c7b307d::t_c95b79b378cdc6 269-310,425-435
+src/client/service-api.ts
+  s_5e55143c7b307d::t_5baa22741052d6 2,32-37
+src/components/internal-workbench.tsx
+  s_5e55143c7b307d::t_f0a9a0c5e82f71 428
+src/domain/batch.test.ts
+  s_5e55143c7b307d::t_975cdad8b30bb9 1-213
+src/domain/batch.ts
+  s_5e55143c7b307d::t_7feae4dbff4c96 1-263
+src/domain/service-contracts.ts
+  s_5e55143c7b307d::t_483f93eb57fa2f 56-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bd47922f3b44b605f91d50dcae4336826eacee5c",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
