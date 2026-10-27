@@ -37,7 +37,7 @@ export function ProductWorkbench() {
     <header className="site-header"><div className="header-content">
       <a href="https://miaocut.app" className="brand-link" aria-label="MiaoCut"><span className="brand-mark"><Scissors size={19} strokeWidth={1.7} /></span>MiaoCut</a>
       <span className="header-divider" /><span className="header-workspace">{t.workspace}</span>
-      <div className="header-actions"><a className="comparison-back" href="/workbench/compare">{app.locale === "zh" ? "查看对比样图" : "Compare samples"}</a><a className="header-link" href="/workbench/poster">{app.locale === "zh" ? "做海报" : "Poster"}</a><button className="demo-badge" onClick={() => about.current?.showModal()} type="button"><span />{t.demo}<CircleHelp size={13} /></button>
+      <div className="header-actions"><a className="comparison-back" href="/workbench/compare">{app.locale === "zh" ? "查看对比样图" : "Compare samples"}</a><a className="header-link" href="/workbench/poster">{app.locale === "zh" ? "做海报" : "Poster"}</a><a className="header-link" href="/workbench/recolor">{app.locale === "zh" ? "精确换色" : "Recolour"}</a><button className="demo-badge" onClick={() => about.current?.showModal()} type="button"><span />{t.demo}<CircleHelp size={13} /></button>
         <button className="icon-button language-button" onClick={() => app.setLocale(app.locale === "zh" ? "en" : "zh")} aria-label={t.language} type="button">{app.locale === "zh" ? "EN" : "中"}</button>
         <button className="icon-button" onClick={app.toggleTheme} aria-label={app.dark ? t.switchLight : t.switchDark} title={app.dark ? t.switchLight : t.switchDark} type="button">{app.dark ? <Sun size={18} /> : <Moon size={18} />}</button>
       </div>
