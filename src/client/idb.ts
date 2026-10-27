@@ -23,6 +23,8 @@ function open(name: string, store: string): Promise<IDBDatabase> {
 
 export interface RecordStore {
   get(key: string): Promise<unknown>;
+  /** 仓库里所有的键。用来清理已经没有任何引用的记录。 */
+  keys(): Promise<string[]>;
   /** 串行写入：较慢的早期写入不会覆盖后面的新内容。 */
   put(key: string, value: unknown): Promise<void>;
   /** 读出当前值，只有 predicate 认可时才删除（同一个事务里完成，不会误删中途新写入的内容）。 */
@@ -44,6 +46,11 @@ export function recordStore(name: string, store: string): RecordStore {
     get: key => withDb(db => new Promise<unknown>((resolve, reject) => {
       const request = db.transaction(store).objectStore(store).get(key);
       request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    })),
+    keys: () => withDb(db => new Promise<string[]>((resolve, reject) => {
+      const request = db.transaction(store).objectStore(store).getAllKeys();
+      request.onsuccess = () => resolve(request.result.filter((key): key is string => typeof key === "string"));
       request.onerror = () => reject(request.error);
     })),
     put(key, value) {

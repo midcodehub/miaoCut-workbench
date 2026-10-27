@@ -1,4 +1,5 @@
-import { FONTS, POSTER_SIZE, fitText, type FitResult, type PosterDocument, type TextLayer } from "@/domain/poster";
+import { FONTS, POSTER_SIZE, fitText, isText, type FitResult, type PosterDocument, type StickerLayer, type TextLayer } from "@/domain/poster";
+import { boxCenter } from "@/domain/sticker";
 
 export const fontSpec = (layer: Pick<TextLayer, "weight" | "fontId">, size: number) =>
   `${layer.weight} ${size}px ${FONTS[layer.fontId].stack}`;
@@ -10,7 +11,7 @@ export const fontSpec = (layer: Pick<TextLayer, "weight" | "fontId">, size: numb
 export async function ensureFonts(doc: PosterDocument): Promise<void> {
   if (typeof document === "undefined" || !document.fonts) return;
   const wanted = new Map<string, string>();
-  for (const layer of doc.layers) {
+  for (const layer of doc.layers.filter(isText)) {
     const font = fontSpec(layer, 32);
     wanted.set(font, (wanted.get(font) ?? "") + layer.text);
   }
@@ -26,10 +27,26 @@ function drawCover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, size:
 }
 
 /**
- * 画出整张海报：背景 → 文字层（数组顺序即叠放顺序）。返回每个文字层的适配结果，界面据此提示“文字超出文本框”。
+ * 画一张贴纸：以外框中心为原点旋转，再把图片拉伸到外框大小。外框的宽高比与图片一致，所以不会变形。
+ * 浏览器按预乘 Alpha 缩放和合成图片，半透明边缘不会出现黑边或白边。图片还没解码好时先不画。
+ */
+function drawSticker(ctx: CanvasRenderingContext2D, layer: StickerLayer, image: HTMLImageElement | undefined, size: number) {
+  if (!image) return;
+  const [cx, cy] = boxCenter(layer.box), width = (layer.box[2] - layer.box[0]) * size, height = (layer.box[3] - layer.box[1]) * size;
+  ctx.save();
+  ctx.translate(cx * size, cy * size);
+  ctx.rotate((layer.rotation * Math.PI) / 180);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, -width / 2, -height / 2, width, height);
+  ctx.restore();
+}
+
+/**
+ * 画出整张海报：背景 → 图层（数组顺序即叠放顺序，文字和贴纸可以交错）。返回每个文字层的适配结果，界面据此提示“文字超出文本框”。
  * 文字在文本框内水平按所选对齐、垂直居中；字号由 fitText 取“放得下的最大值”。
  */
-export function drawPoster(ctx: CanvasRenderingContext2D, doc: PosterDocument, image?: HTMLImageElement): Map<string, FitResult> {
+export function drawPoster(ctx: CanvasRenderingContext2D, doc: PosterDocument, image?: HTMLImageElement,
+  stickers?: ReadonlyMap<string, HTMLImageElement>): Map<string, FitResult> {
   const size = POSTER_SIZE, fits = new Map<string, FitResult>();
   ctx.save();
   ctx.clearRect(0, 0, size, size);
@@ -40,6 +57,7 @@ export function drawPoster(ctx: CanvasRenderingContext2D, doc: PosterDocument, i
     if (image) drawCover(ctx, image, size);
   }
   for (const layer of doc.layers) {
+    if (!isText(layer)) { drawSticker(ctx, layer, stickers?.get(layer.id), size); continue; }
     const x1 = layer.box[0] * size, y1 = layer.box[1] * size, width = (layer.box[2] - layer.box[0]) * size, height = (layer.box[3] - layer.box[1]) * size;
     const fit = fitText(layer.text, width, height, (text, fontSize) => { ctx.font = fontSpec(layer, fontSize); return ctx.measureText(text).width; });
     fits.set(layer.id, fit);
@@ -61,10 +79,11 @@ export function drawPoster(ctx: CanvasRenderingContext2D, doc: PosterDocument, i
  * 导出的图就会和屏幕上看到的不一样。所以这里在预览画布上用同一个 drawPoster 重画一次（内容不变，不会闪），
  * 再 toBlob：导出的就是屏幕上的像素。
  */
-export async function exportPoster(doc: PosterDocument, image: HTMLImageElement | undefined, canvas: HTMLCanvasElement): Promise<Blob> {
+export async function exportPoster(doc: PosterDocument, image: HTMLImageElement | undefined, canvas: HTMLCanvasElement,
+  stickers?: ReadonlyMap<string, HTMLImageElement>): Promise<Blob> {
   await ensureFonts(doc);
   const ctx = canvas.getContext("2d");
   if (!ctx || canvas.width !== POSTER_SIZE || canvas.height !== POSTER_SIZE) throw new Error("canvas_unavailable");
-  drawPoster(ctx, doc, image);
+  drawPoster(ctx, doc, image, stickers);
   return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error("export_failed"))), "image/png"));
 }
