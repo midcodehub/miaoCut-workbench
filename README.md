@@ -4,7 +4,7 @@
 
 Independent Next.js product-scene workbench with a local demo, an internal API route, and free/AI result comparison. Split out of midcodehub/miaoCut, whose root is published as static files and cannot host a Next app with server routes. The backend lives in a private repository.
 
-`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成使用`src/vendor/editor/`里的旧站编辑器引擎副本（原文件、来源 commit 和更新方法见该目录 README）。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
+`/workbench/poster`是免费的海报文字编辑器（见下文“海报文字”）。`/workbench/compare`可直接查看两组之前真实GPU产出的样图，切换免费背景、并排/滑动对比并分别下载。无需账号，不启动GPU或扣积分。免费合成使用`src/vendor/editor/`里的旧站编辑器引擎副本（原文件、来源 commit 和更新方法见该目录 README）。`public/comparison/provenance.json`保留来源和哈希，公开素材只含原有样图与自建测试图，没有用户上传图。内部工作台也接入同一对比组件；离线或状态未知时暂停新的上传/AI生成，已有主体仍可本地合成。
 
 ## 启动 / Run
 
@@ -89,6 +89,39 @@ No image upload or render-job API is called. This mode must remain clearly label
 - 字体使用 `public/fonts/` 里的本地 Geist 文件，不请求外部字体服务。
 
 下一步接入真实服务时，在公开前端只保留业务契约与 UI。凭据、授权、计费、调度以及模型编排属于服务端。
+
+## 海报文字 / Poster text（`/workbench/poster`）
+
+给商品图加标题、卖点和价格。**文字是确定性渲染的**：内容逐字一致，位置就是文本框的归一化坐标 `[x1,y1,x2,y2]`（0～1，与后续 AI 海报接口的文本框契约相同）。修改文字不触发任何 GPU 任务，不收费，也不需要登录；全部在浏览器里完成。
+
+| 项目 | 行为 |
+|---|---|
+| 画布 | 固定 1:1、1024×1024 PNG。其他画幅等各自通过认证后再开放 |
+| 背景 | 纯色，或上传 PNG/JPG/WebP（最大 10 MB）。图片按“填满”居中裁切 |
+| 文字框 | 最多 8 个，每个最多 300 字，换行保存为真实换行符。拖动移动，右下角缩放，方向键微调（Shift 加快），Delete 删除 |
+| 字号 | 自动适应文本框：取“放得下的最大字号”。放不下最小字号（8px）时提示“文字超出文本框”，不会悄悄缩到看不清 |
+| 样式 | 字体（黑体/宋体）、常规/粗体、左中右对齐、颜色；可调整叠放顺序 |
+| 保存 | 工程（不含图片）和背景图存在 IndexedDB `miaocut-workbench-poster-v1`，刷新后恢复；校验不通过的记录不会变成画布状态 |
+| 入口 | 场景工作台（内部页）的结果页和候选预览里有“做成海报”：把结果图交给海报页做背景，**只换背景、文字保持不变** |
+
+价格、日期、数字直接写进文字里，导出时逐字保留。
+
+**字体：** 拉丁字母用随应用打包的 Geist（SIL OFL）；中文等非拉丁字符回退到访客设备上的系统字体，所以同一份工程在不同设备上的中文字形可能不同。需要统一字形时，要挑选并打包一款可商用的开源中文字体（体积为数 MB），目前没有做。
+
+**导出就是屏幕上的像素：** 导出时在用户正在看的预览画布上重画一次再 `toBlob`，而不是另建离屏画布。实测同一段文字画在“挂在页面上的画布”和“游离的画布”上，Chrome 给出的像素并不相同（约 1.6 万个像素不同，笔画边缘和约 1px 的基线位置会变），另建画布导出的图就会和屏幕上看到的不一样。见 `src/client/poster-renderer.ts`。
+
+**从结果页交接背景图：** 场景工作台把结果图写进同源 IndexedDB 的待取区，海报页启动时读取。读取**不删除**，等工程连同新背景保存成功后才清除：开发模式下 React 会把 effect 执行两次，“读到就删”会让第二次读不到、背景换不上。超过 1 小时的记录、类型不对或超过 32 MB 的记录会被忽略。
+
+| 位置 / Path | 职责 / Responsibility |
+|---|---|
+| `src/domain/poster.ts` | 文本框几何、增删改与上限、自动适配字号和换行（`fitText`/`wrapText`）、本地记录校验。纯函数，不碰 DOM |
+| `src/domain/poster.test.ts` | 上述逻辑的单元测试（用确定的假度量，不依赖浏览器字体） |
+| `src/client/poster-renderer.ts` | Canvas 绘制与导出 |
+| `src/client/poster-store.ts` | IndexedDB：工程保存与结果页交接 |
+| `src/client/use-poster.ts` | 页面状态：恢复、保存、背景上传、交接套用 |
+| `src/components/poster-workbench.tsx` | 页面：画布、文本框叠加层、属性面板 |
+
+当前没有做：贴纸、AI 艺术字、多画幅、统一的中文字体。删除文字框后键盘焦点不会自动转到相邻的文本框。
 
 ## 内部 API 联调入口 / Internal API route
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Download, LoaderCircle, Moon, Scissors, Sun, Upload } from "lucide-react";
 import type { LocalAsset, Locale, ProductDocument, Rect } from "@/domain/contracts";
 import type { InternalDraft, ServiceJob, ServiceJobRequest, ServiceQuote, ServiceExecution, ServiceGroup, ServiceGroupQuote } from "@/domain/service-contracts";
@@ -16,6 +17,7 @@ import {SceneComparison} from './scene-comparison';
 import {compositionKey} from '@/domain/comparison';
 import { CANDIDATE_COUNT, candidateRequest, candidateSnapshot, groupActive, groupMatches } from "@/domain/candidates";
 import { CandidateStrip } from "./candidate-strip";
+import { writeHandoff } from "@/client/poster-store";
 
 const copy = {
   zh: {
@@ -34,6 +36,7 @@ const copy = {
     candidates: "生成 4 张候选", candidateOffer: (u: number, n: number, each: number, a: number) => `本次最多 ${u} 积分（${n} 张 × ${each}）· 当前可用 ${a} 积分`,
     candidateRule: "积分逐张预留：完成一张扣一张，未完成或停止的不扣。确认时可用积分需要覆盖全部预算。", candidateConfirm: (u: number) => `确认生成 · 最多 ${u} 积分`,
     candidateBusy: "候选正在生成", previewing: (n: number) => `候选 ${n}`, backToDraft: "返回编辑稿", choose: "设为选定版本", downloadCandidate: "下载这张",
+    makePoster: "做成海报",
     storage: "浏览器无法保存任务记录，请恢复存储权限后重试。", expired: "素材或结果已失效，请重新上传商品。历史任务不会自动重新执行。", mode: "内部测试 · 不扣积分", returnDemo: "返回交互演示", cancelRace: "任务已开始，当前无法取消；正在继续查询。",
   },
   en: {
@@ -52,6 +55,7 @@ const copy = {
     candidates: "Generate 4 candidates", candidateOffer: (u: number, n: number, each: number, a: number) => `Up to ${u} credits (${n} × ${each}) · ${a} available`,
     candidateRule: "Credits are reserved one image at a time and charged only for completed images. Your balance must cover the full budget to start.", candidateConfirm: (u: number) => `Confirm · up to ${u} credits`,
     candidateBusy: "Candidates in progress", previewing: (n: number) => `Candidate ${n}`, backToDraft: "Back to draft", choose: "Use this version", downloadCandidate: "Download this one",
+    makePoster: "Make a poster",
     storage: "The browser cannot save job records. Restore storage access and try again.", expired: "The asset or result is unavailable. Upload the product again; old jobs will not restart automatically.", mode: "Internal test · No credits", returnDemo: "Back to interactive demo", cancelRace: "The job has started and can no longer be cancelled. Status checks continue.",
   },
 };
@@ -66,7 +70,7 @@ function sleep(ms: number, signal: AbortSignal) {
 }
 
 export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
-  const api = useMemo(() => new WorkbenchService(sessionKey), [sessionKey]);
+  const router = useRouter(), api = useMemo(() => new WorkbenchService(sessionKey), [sessionKey]);
   const storageKey = `mc.workbench.internal.v1.${sessionKey}`;
   const [record, setRecord] = useState<InternalDraft>({ version: 1, document: emptyWorkspace().document, view: "draft" });
   const current = useRef(record), uploadLock = useRef(false);
@@ -347,6 +351,12 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
       }
     } catch (e) { if (e instanceof ServiceError && e.code === "cannot_cancel_running") setError("cancelRace"); else report(e); }
   };
+  // 把结果图交给海报页：先存进同源 IndexedDB 的待取区，再跳转。海报页只替换背景，不改已有文字。
+  const makePoster = async (blob: Blob | undefined, name: string) => {
+    if (!blob) return;
+    try { await writeHandoff(blob, name); router.push("/poster"); } // basePath（/workbench）由路由自动补上
+    catch { setError("storage"); }
+  };
   const candidatesBusy = !!groupRecord && (!groupRecord.confirmed || (!!groupView && groupActive(groupView)));
   const generateCandidates = async () => {
     const state = current.current, doc = state.document;
@@ -408,7 +418,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   const move = (placement: Rect) => edit({ placement });
   return <div className="workbench-app internal-workbench">
     <header className="site-header"><div className="header-content"><a className="brand-link" aria-label="MiaoCut" href="https://miaocut.app"><span className="brand-mark"><Scissors size={19} /></span>MiaoCut</a>
-      <span className="header-workspace">{pricing?(locale==='zh'?'积分内测':'Credit test'):c.mode}</span><div className="header-actions"><a className="comparison-back" href="/workbench/compare">{locale==='zh'?'查看对比样图':'Compare samples'}</a><button type="button" className="icon-button" aria-label={t.language} onClick={() => { const next = locale === "zh" ? "en" : "zh"; setLocale(next); document.documentElement.lang = next; }}>{locale === "zh" ? "EN" : "中"}</button>
+      <span className="header-workspace">{pricing?(locale==='zh'?'积分内测':'Credit test'):c.mode}</span><div className="header-actions"><a className="comparison-back" href="/workbench/compare">{locale==='zh'?'查看对比样图':'Compare samples'}</a><a className="header-link" href="/workbench/poster">{locale==='zh'?'做海报':'Poster'}</a><button type="button" className="icon-button" aria-label={t.language} onClick={() => { const next = locale === "zh" ? "en" : "zh"; setLocale(next); document.documentElement.lang = next; }}>{locale === "zh" ? "EN" : "中"}</button>
         <button type="button" className="icon-button" aria-label={dark ? t.switchLight : t.switchDark} onClick={() => { setDark(!dark); document.documentElement.classList.toggle("dark", !dark); }}>{dark ? <Sun size={18} /> : <Moon size={18} />}</button></div></div></header>
     <main className="workspace-main"><div className="page-heading"><div><h1>{c.title}</h1><p>{c.intro}</p></div></div>
       <div className="demo-notice">{pricing?(locale==='zh'?`内测：主体提取 ${pricing.segment} 积分，每张场景图 ${pricing.product} 积分。确认报价后预留积分，完成后扣减。`:`Internal test: extraction ${pricing.segment} credits; each scene ${pricing.product} credits. Credits are reserved after confirmation and charged on completion.`):c.notice}</div>
@@ -439,8 +449,10 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
             <button type="button" className="primary-button" onClick={acceptGroupOffer} disabled={execution !== 'online' || groupOffer.availableCredits < groupOffer.units}>{c.candidateConfirm(groupOffer.units)}</button>
             <button type="button" className="sample-button" onClick={() => setGroupOffer(undefined)}>{locale === 'zh' ? '返回编辑' : 'Back to editing'}</button></div> :
             previewItem?.result ? <div role="region" aria-label={c.previewing(previewItem.index + 1)}><button type="button" className="primary-button" onClick={chooseCandidate}><Check size={17} />{c.choose}</button>
-            <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => { if (previewImage) downloadPng(previewImage.blob, `miaocut-candidate-${previewItem.index + 1}-${previewItem.result!.assetId}.png`); }}><Download size={17} />{c.downloadCandidate}</button></div> :
-            offer?<div role="region" aria-label={locale==='zh'?'确认本次用量':'Confirm credits'}><p>{locale==='zh'?`本次 ${offer.units} 积分 · 当前可用 ${offer.availableCredits} 积分`:`${offer.units} credits · ${offer.availableCredits} available`}</p><p className="control-help">{offer.availableCredits<offer.units?(locale==='zh'?'可用积分不足，请前往账户补充积分。':'Insufficient credits. Add credits from your account.'):null}</p><p className="control-help">{locale==='zh'?'最终失败或取消排队后按账本释放预留积分。过期积分不会重新变为有效积分。':'A final failure or queued cancellation releases the reservation. Expired credits retain their expiry.'}</p><button type="button" className="primary-button" onClick={acceptOffer} disabled={execution!=='online'||offer.availableCredits<offer.units}>{locale==='zh'?`确认生成 · ${offer.units} 积分`:`Confirm · ${offer.units} credits`}</button><button type="button" className="sample-button" onClick={()=>setOffer(undefined)}>{locale==='zh'?'返回编辑':'Back to editing'}</button></div>:readonly && output ? <button type="button" className="primary-button" onClick={() => downloadPng(output.blob, `miaocut-product-${record.result!.assetId}.png`)}><Download size={17} />{t.download}</button> :
+            <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => { if (previewImage) downloadPng(previewImage.blob, `miaocut-candidate-${previewItem.index + 1}-${previewItem.result!.assetId}.png`); }}><Download size={17} />{c.downloadCandidate}</button>
+            <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => void makePoster(previewImage?.blob, `candidate-${previewItem.index + 1}.png`)}>{c.makePoster}</button></div> :
+            offer?<div role="region" aria-label={locale==='zh'?'确认本次用量':'Confirm credits'}><p>{locale==='zh'?`本次 ${offer.units} 积分 · 当前可用 ${offer.availableCredits} 积分`:`${offer.units} credits · ${offer.availableCredits} available`}</p><p className="control-help">{offer.availableCredits<offer.units?(locale==='zh'?'可用积分不足，请前往账户补充积分。':'Insufficient credits. Add credits from your account.'):null}</p><p className="control-help">{locale==='zh'?'最终失败或取消排队后按账本释放预留积分。过期积分不会重新变为有效积分。':'A final failure or queued cancellation releases the reservation. Expired credits retain their expiry.'}</p><button type="button" className="primary-button" onClick={acceptOffer} disabled={execution!=='online'||offer.availableCredits<offer.units}>{locale==='zh'?`确认生成 · ${offer.units} 积分`:`Confirm · ${offer.units} credits`}</button><button type="button" className="sample-button" onClick={()=>setOffer(undefined)}>{locale==='zh'?'返回编辑':'Back to editing'}</button></div>:readonly && output ? <><button type="button" className="primary-button" onClick={() => downloadPng(output.blob, `miaocut-product-${record.result!.assetId}.png`)}><Download size={17} />{t.download}</button>
+            <button type="button" className="secondary-button" onClick={() => void makePoster(output.blob, `result-${record.result!.assetId}.png`)}>{c.makePoster}</button></> :
             <><button type="button" className="primary-button" disabled={!connected || execution!=='online' || pricing?.admissionOpen===false || !!pending || quoting || uploadProgress !== null || !record.document.foregroundAssetId} onClick={() => void generate("product")}>{pending||quoting ? <LoaderCircle size={17} className="spinner" /> : null}{pending ? c.waiting : pricing?`${c.generate} · ${pricing.product}${locale==='zh'?' 积分':' credits'}`:c.generate}</button>
             {candidatesEnabled && pricing ? <button type="button" className="secondary-button" disabled={!connected || execution !== 'online' || pricing.admissionOpen === false || quoting || uploadProgress !== null || !record.document.foregroundAssetId || candidatesBusy} onClick={() => void generateCandidates()}>
               {candidatesBusy ? <><LoaderCircle size={15} className="spinner" />{c.candidateBusy}</> : `${c.candidates} · ${CANDIDATE_COUNT * pricing.product}${locale === 'zh' ? ' 积分' : ' credits'}`}</button> : null}</>}<p className="control-help">{pricing?(locale==='zh'?'以确认的报价为准':'The confirmed quote applies'):c.mode}</p></div></aside>
