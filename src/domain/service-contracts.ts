@@ -64,8 +64,22 @@ export interface ServiceBatchRequest { version: 1; requestId: string; kind: "bat
 export interface ServiceBatchQuote {
   groupId: string; kind: "batch"; units: number; unitUnits: number; count: number; pricingVersion: string; expiresAt: number; availableCredits: number;
 }
-export interface ServiceBatchItem extends ServiceGroupItem { entryId: string }
+/** 批量的每一项带自己的 entryId 和场景（换了设备的页面没有本地记录，下载文件命名要用场景）。 */
+export interface ServiceBatchItem extends ServiceGroupItem { entryId: string; scene?: ProductDocument["scene"] }
 /** 批量组视图：与候选组相同的预算与状态字段，但带 entryIds，不重复返回请求。 */
 export interface ServiceBatch extends Omit<ServiceGroup, "kind" | "request" | "items"> {
   kind: "batch"; entryIds: string[]; items: ServiceBatchItem[];
+}
+
+/**
+ * “我的批次”列表里的一行（GET /groups?kind=batch&limit=N）：只有摘要——状态、进度计数、金额、时间——
+ * 没有请求内容，也不逐项读取控制面。要看每一项的状态和结果图，再按 groupId 取完整视图（ServiceBatch）。
+ * counts 里 running 是“已冻结积分、排队或正在生成”，列表不区分排队和生成；cancelled 是用户停止时被释放的项，
+ * 没来得及开始的项仍算 waiting（组的状态是 cancelled 时页面把它们显示为“已停止”）。
+ */
+export interface ServiceGroupSummary {
+  groupId: string; kind: "candidates" | "batch"; status: ServiceGroup["status"]; pauseReason: ServiceGroup["pauseReason"];
+  count: number; unitUnits: number; budgetUnits: number; settledUnits: number; heldUnits: number; pricingVersion: string;
+  counts: { succeeded: number; running: number; failed: number; cancelled: number; waiting: number };
+  createdAt: number; confirmedAt: number | null; finishedAt: number | null;
 }

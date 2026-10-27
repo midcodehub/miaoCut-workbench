@@ -201,19 +201,21 @@ No image upload or render-job API is called. This mode must remain clearly label
 | 重新生成失败项 | 用失败的几项（沿用原来的场景和构图）再提交一个**新批次**：新的报价、新的订单；成功项保留（页面最多同时记住 5 个批次，同一件商品在任何批次里成功过就显示成功） |
 | ZIP | 在浏览器里用 fflate 打包已完成的结果（只存储不压缩，PNG 本来就压缩过），文件名 `<原文件名>_<场景>_<画幅>.png`，画幅里的冒号换成 x，重名（不分大小写）加 `-2`、`-3`。服务器不额外存一份 |
 | 已提交的商品 | 属于某个批次的商品不能再排除、替换、移除（结果要和它们对上）；“开始新的一批”清空商品和已记住的批次 |
+| 我的批次 | 页面下方列出服务端记录的最近 10 个批次（`GET groups?kind=batch&limit=10`，只有摘要：状态、完成 / 失败 / 生成中 / 等待计数、已用 / 预算、时间）。**换了设备或清了浏览器记录，进行中的批次也能找回**：本页正在跟踪的批次标“当前页面”，其余的点“查看结果”，按 groupId 取回每一项的状态和结果图，可以停止剩余、余额不足时继续、下载已完成的 ZIP（没有原文件名，文件按 `product-NN_<场景>_1x1.png` 命名）。有批次在服务端运行时 10 秒刷新一次，否则 60 秒；本页批次的状态一变化就立刻刷新。响应先过 `validGroupSummaries`，形状或计数对不上的行不显示 |
 
 **保存：** 商品记录、方案和批次（groupId 与提交的请求）存在 localStorage（`mc.workbench.batch.v1.<sessionKey>.<authUserId>`），读回时先过 `validBatchDraft` 校验，损坏的记录不会变成服务请求。上传中的商品不保存（文件刷新后就没了）；提取中的商品按保存的任务继续查询，不重复提交。
 
 | 位置 / Path | 职责 / Responsibility |
 |---|---|
-| `src/domain/batch.ts` | 主体检查、自动放置、请求构造、状态汇总与“显示哪个批次的结果”、ZIP 命名与打包、本地记录校验。纯函数，不碰 DOM |
+| `src/domain/batch.ts` | 主体检查、自动放置、请求构造、状态汇总与“显示哪个批次的结果”、ZIP 命名与打包、本地记录校验、“我的批次”列表校验。纯函数，不碰 DOM |
 | `src/domain/batch.test.ts` | 上述逻辑的单元测试 |
-| `src/domain/service-contracts.ts` | 批量请求、报价、批次视图的类型 |
-| `src/client/use-batch.ts` | 页面状态：上传与提取调度、轮询、报价与确认、停止 / 继续、重新生成、下载 |
-| `src/client/service-api.ts` | 批量使用与四候选相同的一组接口（`group-quotes`、`groups`），请求里 `kind` 为 `batch` |
+| `src/domain/service-contracts.ts` | 批量请求、报价、批次视图、“我的批次”列表摘要的类型 |
+| `src/client/use-batch.ts` | 页面状态：上传与提取调度、轮询、报价与确认、停止 / 继续、重新生成、下载、“我的批次”列表与按 groupId 取回 |
+| `src/client/service-api.ts` | 批量使用与四候选相同的一组接口（`group-quotes`、`groups`），请求里 `kind` 为 `batch`；`batches(limit)` 读取我的批次列表 |
+| `src/domain/internal-query.ts` | 内部 API 转发层唯一放行的查询串：`GET groups?kind=…&limit=…`，只认这两个参数、值必须在白名单里，转发时用校验过的值重新拼，其他查询串一律 404 |
 | `src/components/batch-workbench.tsx`、`src/app/batch/page.tsx` | 页面（受 `WORKBENCH_INTERNAL_ENABLED` 控制） |
 
-当前没有做：画幅 3:4 / 9:16 / 16:9（要等各自通过认证）、单张微调构图、“用户主动暂停”（只有取消剩余和余额不足的被动暂停）、跨设备找回批次（服务端没有“列出我的批次”的接口，目前只能凭本地保存的 groupId）、预计剩余时间（只显示“单张约 1～2 分钟”的说明）、通知。
+当前没有做：画幅 3:4 / 9:16 / 16:9（要等各自通过认证）、单张微调构图、“用户主动暂停”（只有取消剩余和余额不足的被动暂停）、换设备后重新生成失败项（列表只有摘要，没有每一项的素材和构图，所以只能在提交批次的浏览器里重新生成）、预计剩余时间（只显示“单张约 1～2 分钟”的说明）、通知。
 
 ## 内部 API 联调入口 / Internal API route
 
@@ -226,6 +228,8 @@ WORKBENCH_INTERNAL_ENABLED=1
 WORKBENCH_API_URL=https://YOUR_AUTHORIZED_API_HOST
 WORKBENCH_SESSION_STORAGE_KEY=sb-YOUR_PROJECT_REF-auth-token
 ```
+
+`/workbench/api/internal/*` 只转发固定的路径；**唯一允许带查询串的是 `GET groups`（我的批次列表）**，由 `src/domain/internal-query.ts` 校验后重新拼成，其余请求带查询串一律 404。
 
 服务端必须已提供同版本 `/comfy/v1` 资产、任务与能力接口，并授权该内部测试账户。工作台复用同源已有 Supabase 会话，不接受模型图、R2 管理凭据或第二套钱包。跨域部署的会话交接与完整登录刷新仍需单独验收；本页遇到 401 会提示回原账户登录，并保留任务记录。
 

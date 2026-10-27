@@ -7,7 +7,7 @@
  */
 import { Zip, ZipPassThrough } from "fflate";
 import type { Rect, SceneId } from "./contracts";
-import type { ServiceBatch, ServiceBatchEntry, ServiceBatchItem, ServiceBatchRequest, ServiceGroupItemState } from "./service-contracts";
+import type { ServiceBatch, ServiceBatchEntry, ServiceBatchItem, ServiceBatchRequest, ServiceGroupItemState, ServiceGroupSummary } from "./service-contracts";
 
 export const MAX_BATCH_PRODUCTS = 20;
 export const SCENES: readonly SceneId[] = ["marble", "wood", "geometry"];
@@ -185,6 +185,47 @@ export function batchMatches(batch: ServiceBatch, record: { groupId: string; req
     batch.entryIds.length === ids.length && batch.entryIds.every((id, index) => id === ids[index]) &&
     Array.isArray(batch.items) && batch.items.length === ids.length && batch.items.every((item, index) => item.index === index && item.entryId === ids[index]);
 }
+
+// ───────────────────────── 我的批次（服务端列表） ─────────────────────────
+
+/** 页面最多向服务端要几个批次：最近的 10 个足够找回进行中的批次，也让一次响应保持很小。 */
+export const HISTORY_LIMIT = 10;
+const COUNT_KEYS = ["succeeded", "running", "failed", "cancelled", "waiting"] as const;
+const nonNegative = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+/**
+ * 服务端返回的列表先过一遍校验再显示：页面不信任响应的形状。形状不对的行直接丢掉（而不是整张列表报错），
+ * 计数加起来必须正好等于项数——这是“列表不骗人”的最低要求，对不上的行不显示，免得给用户一个错的进度。
+ * 只保留批量（kind = batch），重复的 groupId 只留第一行（服务端已按时间排序）。
+ */
+export function validGroupSummaries(value: unknown): ServiceGroupSummary[] {
+  const rows = (value as { groups?: unknown } | null)?.groups;
+  if (!Array.isArray(rows)) return [];
+  const seen = new Set<string>(), out: ServiceGroupSummary[] = [];
+  for (const row of rows as ServiceGroupSummary[]) {
+    if (!row || typeof row !== "object" || row.kind !== "batch" || typeof row.groupId !== "string" || !UUID.test(row.groupId) || seen.has(row.groupId)) continue;
+    if (!["running", "paused", "completed", "cancelled"].includes(row.status)) continue;
+    if (!nonNegative(row.count) || row.count < 1 || row.count > 60 || ![row.unitUnits, row.budgetUnits, row.settledUnits, row.heldUnits].every(nonNegative)) continue;
+    const counts = row.counts;
+    if (!counts || !COUNT_KEYS.every(key => nonNegative(counts[key])) || COUNT_KEYS.reduce((sum, key) => sum + counts[key], 0) !== row.count) continue;
+    if (!Number.isFinite(row.createdAt) || (row.pauseReason !== null && !["insufficient_credits", "reservation_failed"].includes(row.pauseReason))) continue;
+    seen.add(row.groupId); out.push(row);
+  }
+  return out;
+}
+/** 这一行还在服务端推进（要定期刷新）。暂停（等待积分）要等用户补充后继续，不会自己变化。 */
+export const summaryActive = (row: Pick<ServiceGroupSummary, "status">) => row.status === "running";
+/** 本页面（localStorage 里）已经在跟踪的批次：它们在上面的商品表里显示，列表里只标“当前页面”。 */
+export const summaryIsLocal = (row: Pick<ServiceGroupSummary, "groupId">, groups: readonly { groupId: string }[]) => groups.some(group => group.groupId === row.groupId);
+/**
+ * 换了设备后按 groupId 取回的完整视图，必须真的是被点开的那一个批次、形状自洽才显示。
+ * 本地记录对得上的批次用更严格的 batchMatches；这里没有本地请求可比，只能检查视图自身。
+ */
+export function remoteBatchValid(view: ServiceBatch, groupId: string): boolean {
+  return !!view && view.groupId === groupId && view.kind === "batch" && Array.isArray(view.items) && Array.isArray(view.entryIds) && view.items.length === view.count &&
+    view.entryIds.length === view.count && view.items.every((item, index) => item.index === index && item.entryId === view.entryIds[index]);
+}
+/** 换了设备后的 ZIP 文件名：没有原文件名，用“商品 NN”和场景命名，格式与本机下载一致（`product-01_wood_1x1.png`）。 */
+export const remoteZipName = (index: number, scene: string | undefined, used: Set<string>) => zipName(`product-${String(index + 1).padStart(2, "0")}`, scene ?? "scene", "1:1", used);
 
 // ───────────────────────── ZIP ─────────────────────────
 
