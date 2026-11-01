@@ -1,5 +1,5 @@
 import type { LocalAsset } from "@/domain/contracts";
-import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest, ServiceGroup, ServiceGroupQuote, ServiceGroupRequest, ServiceJob, ServiceJobRequest } from "@/domain/service-contracts";
+import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest, ServiceGroup, ServiceGroupQuote, ServiceGroupRequest, ServiceGroupSummary, ServiceJob, ServiceJobRequest } from "@/domain/service-contracts";
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
 
@@ -33,6 +33,8 @@ export class WorkbenchService {
   batchQuote(request: ServiceBatchRequest) { return this.call<ServiceBatchQuote>("group-quotes", { request }); }
   createBatch(groupId: string, request: ServiceBatchRequest, signal?: AbortSignal) { return this.call<ServiceBatch>("groups", { groupId, request }, signal); }
   batch(id: string, signal?: AbortSignal) { return this.call<ServiceBatch>(`groups/${id}`, undefined, signal); }
+  /** 我的批次（最近的在前，最多 50 个）：只有摘要。返回前由调用方过一遍 validGroupSummaries。 */
+  batches(limit: number, signal?: AbortSignal) { return this.call<{ groups: ServiceGroupSummary[] }>(`groups?kind=batch&limit=${limit}`, undefined, signal); }
   cancelBatch(id: string) { return this.call<ServiceBatch>(`groups/${id}/cancel`, {}); }
   resumeBatch(id: string) { return this.call<ServiceBatch>(`groups/${id}/resume`, {}); }
   async upload(file: File, onProgress: (percent: number) => void): Promise<ServiceAsset> {

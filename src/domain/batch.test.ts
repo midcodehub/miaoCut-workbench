@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { unzipSync } from "fflate";
 import {
   DEFAULT_PLAN, MAX_BATCH_PRODUCTS, SCALE_FACTOR, SUBJECT_LIMITS, analyzeSubject, batchActive, batchBudget, batchCounts, batchMatches, batchRequestFor, checkSubject,
-  entryAspect, entryOutcome, failedEntryIds, included, placeSubject, validBatchDraft, zipFiles, zipName,
+  entryAspect, entryOutcome, failedEntryIds, included, placeSubject, remoteBatchValid, remoteZipName, summaryActive, summaryIsLocal, validBatchDraft, validGroupSummaries, zipFiles, zipName,
   type BatchDraft, type BatchEntryRecord, type CompositionRule,
 } from "./batch";
-import type { ServiceBatch, ServiceBatchItem } from "./service-contracts";
+import type { ServiceBatch, ServiceBatchItem, ServiceGroupSummary } from "./service-contracts";
 
 const id = () => crypto.randomUUID();
 const rules: CompositionRule[] = [];
@@ -210,4 +210,54 @@ test("entryOutcome: a success in any batch is kept, otherwise the newest batch d
   // 成功之后的重做不能把成功盖掉：第二个批次里同一件商品失败了，仍然显示第一个批次的成功。
   const failedRedo = view([a], ["failed"], "completed");
   assert.equal(entryOutcome(a, [...groups, { groupId: failedRedo.groupId }], { ...views, [failedRedo.groupId]: failedRedo })?.item.state, "succeeded");
+});
+
+// ── 我的批次（服务端列表） ───────────────────────────────────────────────────────────────────────
+const summary = (patch: Partial<ServiceGroupSummary> = {}): ServiceGroupSummary => ({
+  groupId: id(), kind: "batch", status: "running", pauseReason: null, count: 5, unitUnits: 2, budgetUnits: 10, settledUnits: 2, heldUnits: 4, pricingVersion: "v1",
+  counts: { succeeded: 1, running: 2, failed: 0, cancelled: 0, waiting: 2 }, createdAt: 1_700_000_000_000, confirmedAt: 1_700_000_001_000, finishedAt: null, ...patch,
+});
+
+test("validGroupSummaries: keeps well-formed batch rows in order and drops anything the page cannot trust", () => {
+  const a = summary(), b = summary({ status: "completed", counts: { succeeded: 5, running: 0, failed: 0, cancelled: 0, waiting: 0 }, finishedAt: 1_700_000_900_000 });
+  assert.deepEqual(validGroupSummaries({ groups: [a, b] }).map(row => row.groupId), [a.groupId, b.groupId]);
+  assert.deepEqual(validGroupSummaries({ groups: [] }), []);
+  for (const bad of [null, undefined, {}, { groups: "x" }, { groups: null }, []]) assert.deepEqual(validGroupSummaries(bad), []);
+  const broken: Partial<ServiceGroupSummary>[] = [
+    { kind: "candidates" }, { groupId: "nope" }, { status: "quoted" as never }, { status: "weird" as never }, { count: 0 }, { count: 61 }, { count: 2.5 },
+    { budgetUnits: -1 }, { settledUnits: NaN }, { heldUnits: "4" as never }, { createdAt: Infinity }, { pauseReason: "other" as never },
+    { counts: { succeeded: 1, running: 2, failed: 0, cancelled: 0, waiting: 1 } },                 // 加起来 4 ≠ 5：对不上的进度不显示
+    { counts: { succeeded: 1, running: 2, failed: 0, cancelled: 0 } as never }, { counts: undefined as never }, { counts: { succeeded: -1, running: 3, failed: 0, cancelled: 0, waiting: 3 } },
+  ];
+  for (const patch of broken) assert.deepEqual(validGroupSummaries({ groups: [a, summary(patch)] }).map(row => row.groupId), [a.groupId], JSON.stringify(patch));
+  assert.deepEqual(validGroupSummaries({ groups: [a, null, 7, "x", { ...a }] }).map(row => row.groupId), [a.groupId], "non-objects are dropped and a repeated groupId keeps the first row");
+  assert.equal(validGroupSummaries({ groups: [summary({ status: "paused", pauseReason: "insufficient_credits" })] }).length, 1);
+});
+
+test("summaryActive and summaryIsLocal: only a running group refreshes by itself; local groups are marked", () => {
+  assert.equal(summaryActive(summary({ status: "running" })), true);
+  for (const status of ["paused", "completed", "cancelled"] as const) assert.equal(summaryActive(summary({ status })), false, status);
+  const row = summary();
+  assert.equal(summaryIsLocal(row, [{ groupId: id() }, { groupId: row.groupId }]), true);
+  assert.equal(summaryIsLocal(row, [{ groupId: id() }]), false);
+  assert.equal(summaryIsLocal(row, []), false);
+});
+
+test("remoteBatchValid: the view must be the opened batch and agree with itself; remote ZIP names follow the local scheme", () => {
+  const groupId = id(), entryIds = [id(), id(), id()];
+  const view = (patch: Partial<ServiceBatch> = {}): ServiceBatch => ({
+    groupId, kind: "batch", entryIds, count: 3, status: "running", pauseReason: null, budgetUnits: 6, unitUnits: 2, settledUnits: 0, heldUnits: 0, pricingVersion: "v1", createdAt: 1,
+    items: entryIds.map((entryId, index) => ({ index, entryId, attempt: 0, units: 2, state: "waiting" as const })), ...patch });
+  assert.equal(remoteBatchValid(view(), groupId), true);
+  assert.equal(remoteBatchValid(view(), id()), false, "another batch than the one that was opened");
+  assert.equal(remoteBatchValid(view({ kind: "candidates" as never }), groupId), false);
+  assert.equal(remoteBatchValid(view({ count: 4 }), groupId), false);
+  assert.equal(remoteBatchValid(view({ entryIds: entryIds.slice(0, 2) }), groupId), false);
+  assert.equal(remoteBatchValid(view({ items: view().items.slice().reverse() }), groupId), false, "items out of order");
+  assert.equal(remoteBatchValid(view({ items: undefined as never }), groupId), false);
+  const used = new Set<string>();
+  assert.equal(remoteZipName(0, "wood", used), "product-01_wood_1x1.png");
+  assert.equal(remoteZipName(11, "marble", used), "product-12_marble_1x1.png");
+  assert.equal(remoteZipName(0, "wood", used), "product-01_wood_1x1-2.png", "same name twice is de-duplicated");
+  assert.equal(remoteZipName(2, undefined, new Set()), "product-03_scene_1x1.png", "an item without a scene still gets a valid name");
 });

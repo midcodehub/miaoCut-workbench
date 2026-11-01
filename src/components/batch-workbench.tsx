@@ -1,15 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Archive, ArrowLeft, Ban, Check, Download, ImagePlus, LoaderCircle, Moon, Play, RefreshCw, Replace, RotateCcw, Scissors, Sun, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
+import { Archive, ArrowLeft, Ban, Check, ChevronDown, ChevronUp, Download, ImagePlus, LoaderCircle, Moon, Play, RefreshCw, Replace, RotateCcw, Scissors, Sun, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
 import { accountConfigured } from "@/client/account-auth";
 import { useBatch } from "@/client/use-batch";
 import {
-  MAX_BATCH_PRODUCTS, SCENES, batchBudget, batchCounts, batchStoppable, entryPlacement,
+  MAX_BATCH_PRODUCTS, SCENES, batchBudget, batchCounts, batchStoppable, entryPlacement, summaryIsLocal,
   type BatchEntryRecord, type CompositionRule, type SubjectReason,
 } from "@/domain/batch";
 import type { LocalAsset, SceneId } from "@/domain/contracts";
-import type { ServiceGroupItemState } from "@/domain/service-contracts";
+import type { ServiceGroupItemState, ServiceGroupSummary } from "@/domain/service-contracts";
 import { BlobImage } from "./blob-image";
 
 const copy = {
@@ -43,7 +43,11 @@ const copy = {
     zip: "下载已完成 ZIP", zipDone: (n: number) => `已打包 ${n} 张`, startOver: "开始新的一批", startOverHint: "清空商品和结果，重新开始。已下载的文件不受影响。",
     eta: "单张约 1～2 分钟（按已有实测估算），GPU 节点离线时暂停。",
     waiting: "等待中", awaiting_credits: "等待积分", queued: "已排队", leased: "正在生成", verifying: "正在校验", settling: "正在保存", succeeded: "已完成", state_failed: "失败", state_cancelled: "已停止",
-    preview: "构图预览",
+    preview: "构图预览", notFound: "找不到这个批次，可能已经过期。",
+    historyTitle: "我的批次", historyHint: "换了设备或清了浏览器记录，也能在这里找回最近 10 个批次：查看结果、停止或下载。", historyEmpty: "还没有提交过批次。",
+    historyError: "没能读取批次列表，会自动重试。", refresh: "刷新列表", historyCount: (n: number) => `${n} 件`, thisPage: "当前页面", viewResults: "查看结果", hideResults: "收起",
+    groupRunning: "进行中", groupPaused: "等待积分", groupCompleted: "已完成", groupCancelled: "已停止", itemN: (n: number) => `第 ${n} 件`, loadingBatch: "正在读取批次…",
+    remoteHint: "这个批次不是在当前浏览器里提交的，没有原文件名：下载的文件按“商品序号 + 场景”命名。", zipRemote: "下载已完成 ZIP",
   },
   en: {
     title: "Batch scenes", intro: "Add up to 20 products, extract and check each subject, then apply one plan to generate scene images in bulk. Nothing is charged before you confirm the budget; the batch keeps running on the server if you close the page.",
@@ -75,13 +79,26 @@ const copy = {
     zip: "Download finished as ZIP", zipDone: (n: number) => `${n} image(s) packed`, startOver: "Start a new batch", startOverHint: "Clears the products and results. Files you already downloaded are not affected.",
     eta: "About 1–2 minutes per image (from earlier measurements); paused while the GPU node is offline.",
     waiting: "Waiting", awaiting_credits: "Waiting for credits", queued: "Queued", leased: "Generating", verifying: "Checking", settling: "Saving", succeeded: "Done", state_failed: "Failed", state_cancelled: "Stopped",
-    preview: "Composition preview",
+    preview: "Composition preview", notFound: "This batch was not found; it may have expired.",
+    historyTitle: "My batches", historyHint: "If you switched devices or cleared this browser, your 10 latest batches are still here: view results, stop, or download.", historyEmpty: "No batches submitted yet.",
+    historyError: "Could not load your batches. Retrying automatically.", refresh: "Refresh list", historyCount: (n: number) => `${n} item(s)`, thisPage: "This page", viewResults: "View results", hideResults: "Hide",
+    groupRunning: "Running", groupPaused: "Waiting for credits", groupCompleted: "Completed", groupCancelled: "Stopped", itemN: (n: number) => `Item ${n}`, loadingBatch: "Loading the batch…",
+    remoteHint: "This batch was not submitted in this browser, so original file names are not available: downloads are named by product number and scene.", zipRemote: "Download finished as ZIP",
   },
 };
 type Copy = (typeof copy)["zh"] | (typeof copy)["en"];
 const sceneClass: Record<SceneId, string> = { marble: "scene-marble", wood: "scene-wood", geometry: "scene-geometry" };
 const rule = <K extends keyof CompositionRule>(key: K, value: CompositionRule[K], current: CompositionRule): CompositionRule => ({ ...current, [key]: value });
 const stateLabel = (state: ServiceGroupItemState, c: Copy) => (state === "failed" ? c.state_failed : state === "cancelled" ? c.state_cancelled : c[state]);
+const stateClass = (state: ServiceGroupItemState) => (state === "succeeded" ? "is-ok" : state === "failed" ? "is-bad" : state === "cancelled" ? "is-muted" : "is-busy");
+const groupLabel = (status: ServiceGroupSummary["status"], c: Copy) => (status === "running" ? c.groupRunning : status === "paused" ? c.groupPaused : status === "completed" ? c.groupCompleted : c.groupCancelled);
+const groupClass = (status: ServiceGroupSummary["status"]) => (status === "running" ? "is-busy" : status === "paused" ? "is-warn" : status === "completed" ? "is-ok" : "is-muted");
+/** 列表一行的进度文字。用户停止的批次里没来得及开始的项显示为“已停止”，其余只列出非零的计数。 */
+function progressText(row: ServiceGroupSummary, c: Copy) {
+  const { counts } = row, stopped = row.status === "cancelled" ? counts.cancelled + counts.waiting : counts.cancelled, waiting = row.status === "cancelled" ? 0 : counts.waiting;
+  return [`${c.doneCount} ${counts.succeeded}`, counts.running ? `${c.runningCount} ${counts.running}` : "", waiting ? `${c.waitingCount} ${waiting}` : "",
+    counts.failed ? `${c.failedCount} ${counts.failed}` : "", stopped ? `${c.state_cancelled} ${stopped}` : ""].filter(Boolean).join(" · ");
+}
 
 /** 构图预览：场景背景上按放置矩形裁出主体的可见部分（前景图是整张原图大小，所以要按可见包围盒裁剪）。 */
 function PlacementTile({ entry, thumb, scene, plan }: { entry: BatchEntryRecord; thumb: LocalAsset | undefined; scene: SceneId; plan: Parameters<typeof entryPlacement>[1] }) {
@@ -95,7 +112,8 @@ function PlacementTile({ entry, thumb, scene, plan }: { entry: BatchEntryRecord;
 export function BatchWorkbench({ sessionKey }: { sessionKey: string }) {
   const app = useBatch(sessionKey), c = copy[app.locale];
   const input = useRef<HTMLInputElement>(null), replaceInput = useRef<HTMLInputElement>(null), replaceTarget = useRef<string | null>(null);
-  const [dragging, setDragging] = useState(false), [zipNote, setZipNote] = useState<string | null>(null), [zipBusy, setZipBusy] = useState(false);
+  const [dragging, setDragging] = useState(false), [zipNote, setZipNote] = useState<string | null>(null), [zipBusy, setZipBusy] = useState(false), [remoteZipBusy, setRemoteZipBusy] = useState(false);
+  const formatTime = (ms: number) => new Date(ms).toLocaleString(app.locale === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const online = app.execution === "online", admissionOpen = app.pricing?.admissionOpen !== false;
   const unit = app.pricing?.product ?? 0, sourceReady = app.entries.every(entry => ["ready", "failed"].includes(entry.stage));
   const suspicious = app.ready.filter(entry => (entry.check?.reasons.length ?? 0) > 0).length;
@@ -210,6 +228,56 @@ export function BatchWorkbench({ sessionKey }: { sessionKey: string }) {
             </div>
             {zipNote ? <p className="control-help">{zipNote}</p> : null}
             {!running ? <p className="control-help">{c.startOverHint}</p> : null}
+          </div> : null}
+
+          {app.limits ? <div className="panel-section batch-history" aria-label={c.historyTitle}>
+            <div className="section-title"><h2>{c.historyTitle}</h2>
+              <button type="button" className="icon-button" aria-label={c.refresh} title={c.refresh} disabled={app.historyState === "loading"} onClick={() => void app.refreshHistory()}>
+                <RefreshCw size={14} className={app.historyState === "loading" ? "spinner" : undefined} /></button></div>
+            <p className="control-help">{c.historyHint}</p>
+            {app.historyState === "error" ? <p className="poster-warning" role="alert"><TriangleAlert size={13} />{c.historyError}</p> : null}
+            {app.history.length === 0 && app.historyState !== "error" ? <p className="control-help">{app.historyState === "loading" ? c.loadingBatch : c.historyEmpty}</p> : null}
+            {app.history.length > 0 ? <ul className="batch-history-list">
+              {app.history.map(row => {
+                const local = summaryIsLocal(row, app.groups), isOpen = app.opened === row.groupId, view = isOpen ? app.openedView : undefined;
+                const remoteDone = view ? view.items.filter(item => app.remoteResult(item)).length : 0;
+                return <li key={row.groupId} className="batch-history-item">
+                  <div className="batch-history-row">
+                    <span className="batch-history-when">{formatTime(row.createdAt)}</span>
+                    <span className="batch-history-count">{c.historyCount(row.count)}</span>
+                    <span className={`batch-status ${groupClass(row.status)}`}>{groupLabel(row.status, c)}</span>
+                    {local ? <span className="batch-status is-muted batch-history-action">{c.thisPage}</span>
+                      : <button type="button" className="secondary-button batch-history-action" aria-expanded={isOpen} onClick={() => (isOpen ? app.closeGroup() : app.openGroup(row.groupId))}>
+                        {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}{isOpen ? c.hideResults : c.viewResults}</button>}
+                    <span className="batch-history-detail">{progressText(row, c)} · {c.used(row.settledUnits, row.budgetUnits)}</span>
+                  </div>
+                  {isOpen ? <div className="batch-remote" role="region" aria-label={c.viewResults}>
+                    <p className="control-help">{c.remoteHint}</p>
+                    {!view ? <p className="control-help" role="status"><LoaderCircle size={13} className="spinner" /> {c.loadingBatch}</p> : <>
+                      {view.status === "paused" ? <p className="poster-warning" role="alert"><TriangleAlert size={13} />{c.pausedCredits}</p> : null}
+                      <ul className="batch-remote-grid">
+                        {view.items.map(item => {
+                          const image = app.remoteResult(item);
+                          return <li key={item.index} className="batch-remote-item">
+                            <span className="batch-result-image batch-remote-image checkerboard">{image ? <BlobImage blob={image.blob} alt="" /> : item.state === "succeeded" ? <LoaderCircle size={14} className="spinner" /> : null}</span>
+                            <span className="batch-remote-name">{c.itemN(item.index + 1)}</span>
+                            <span className={`batch-status ${stateClass(item.state)}`}>{["queued", "leased", "verifying", "settling"].includes(item.state) ? <LoaderCircle size={13} className="spinner" /> : null}{stateLabel(item.state, c)}</span>
+                            {image ? <button type="button" className="icon-button" aria-label={`${c.download}: ${c.itemN(item.index + 1)}`} title={c.download} onClick={() => app.downloadRemoteOne(item)}><Download size={14} /></button> : null}
+                          </li>;
+                        })}
+                      </ul>
+                      <div className="batch-buttons">
+                        {batchStoppable(view) ? <button type="button" className="secondary-button" disabled={app.busy} onClick={() => void app.stop(view.groupId)}><Ban size={15} />{c.stop}</button> : null}
+                        {view.status === "paused" ? <button type="button" className="secondary-button" disabled={app.busy || !online} onClick={() => void app.resumeGroup(view.groupId)}><Play size={15} />{c.resume}</button> : null}
+                        <button type="button" className="primary-button" disabled={remoteZipBusy || remoteDone === 0}
+                          onClick={() => { setRemoteZipBusy(true); void app.downloadRemoteZip(view.groupId).catch(() => app.dismissProblem()).finally(() => setRemoteZipBusy(false)); }}>
+                          {remoteZipBusy ? <LoaderCircle size={15} className="spinner" /> : <Archive size={15} />}{c.zipRemote}{remoteDone > 0 ? ` · ${remoteDone}` : ""}</button>
+                      </div>
+                    </>}
+                  </div> : null}
+                </li>;
+              })}
+            </ul> : null}
           </div> : null}
         </section>
 
