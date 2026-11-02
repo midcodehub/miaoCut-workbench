@@ -1,0 +1,35 @@
+.gitignore
+  s_5e55143c7b307d::t_b8d7bc7eebf8d6 8
+eslint.config.mjs
+  s_5e55143c7b307d::t_b0fb1e4a535f24 11
+package.json
+  s_5e55143c7b307d::t_6330fa5ce166f6 11-13
+scripts/build-static.mjs
+  s_5e55143c7b307d::t_b018c6b7b91449 1-60
+scripts/static-plan.mjs
+  s_5e55143c7b307d::t_a737f30122a870 1-54
+scripts/static-plan.test.mjs
+  s_5e55143c7b307d::t_4f73534559edf4 1-45
+src/client/service-api.ts
+  s_5e55143c7b307d::t_748400ac245695 5,15
+src/domain/service-url.test.ts
+  s_5e55143c7b307d::t_e6e14b69386272 1-31
+src/domain/service-url.ts
+  s_5e55143c7b307d::t_9b05108391476d 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ab36971b6d6d0010d15f1f234e2547826d83bb67",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
