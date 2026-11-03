@@ -8,8 +8,9 @@
     "start": "next start --hostname 127.0.0.1 --port 3100",
     "check": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test src/domain/*.test.ts",
-    "bench:recolor": "tsx scripts/bench-recolor.ts"
+    "test": "tsx --test src/domain/*.test.ts && node --test scripts/*.test.mjs",
+    "bench:recolor": "tsx scripts/bench-recolor.ts",
+    "build:static": "node scripts/build-static.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

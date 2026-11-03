@@ -2,6 +2,7 @@ import type { LocalAsset } from "@/domain/contracts";
 import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest, ServiceGroup, ServiceGroupQuote, ServiceGroupRequest, ServiceGroupSummary, ServiceJob, ServiceJobRequest } from "@/domain/service-contracts";
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
+import { serviceUrl } from "@/domain/service-url";
 
 export class ServiceError extends Error {
   constructor(readonly code: string, readonly status = 0) { super(code); }
@@ -11,7 +12,7 @@ export class WorkbenchService {
   async call<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const token=await accountToken(this.sessionKey);
     if (!token) throw new ServiceError("login_required", 401);
-    const response = await fetch(`/workbench/api/internal/${path}`, { method: body === undefined ? "GET" : "POST",
+    const response = await fetch(serviceUrl(path, process.env.NEXT_PUBLIC_WORKBENCH_API_URL), { method: body === undefined ? "GET" : "POST",
       headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body), signal, cache: "no-store", redirect: "error" });
     const data = await response.json();
