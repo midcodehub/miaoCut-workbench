@@ -278,7 +278,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   useEffect(() => {
     if (!connected || !displayAssetId) return;
     const controller = new AbortController();
-    void api.asset(displayAssetId, controller.signal).then(a => api.image(a, controller.signal, trackImage(displayAssetId))).then(image => {
+    void api.asset(displayAssetId, controller.signal).then(a => api.preview(a, controller.signal, trackImage(displayAssetId))).then(image => {
       finishImage(displayAssetId);
       if (!controller.signal.aborted) setAsset(image);
     }).catch(e => { finishImage(displayAssetId); if (!controller.signal.aborted) report(e); });
@@ -288,7 +288,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   useEffect(() => {
     if (!connected || !resultId) return;
     const controller = new AbortController();
-    void api.asset(resultId, controller.signal).then(a => api.image(a, controller.signal, trackImage(resultId))).then(image => {
+    void api.asset(resultId, controller.signal).then(a => api.preview(a, controller.signal, trackImage(resultId))).then(image => {
       finishImage(resultId);
       if (!controller.signal.aborted) setResult(image);
     }).catch(e => { finishImage(resultId); if (!controller.signal.aborted) report(e); });
@@ -300,7 +300,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   useEffect(()=>{
     if(!connected||!comparisonId||asset?.id===comparisonId)return;
     const controller=new AbortController();
-    void api.asset(comparisonId,controller.signal).then(a=>api.image(a,controller.signal,trackImage(comparisonId))).then(a=>{
+    void api.asset(comparisonId,controller.signal).then(a=>api.preview(a,controller.signal,trackImage(comparisonId))).then(a=>{
       finishImage(comparisonId);
       if(!controller.signal.aborted)setSavedForeground(a);
     }).catch(e=>{finishImage(comparisonId);if(!controller.signal.aborted)report(e);});
@@ -363,6 +363,22 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
         setServerJob(job);
       }
     } catch (e) { if (e instanceof ServiceError && e.code === "cannot_cancel_running") setError("cancelRace"); else report(e); }
+  };
+  // 页面上显示的图可能是服务端的缩小预览（WebP，只用于显示，见 domain/preview.ts）。下载、做海报、换色必须用原始 PNG：
+  // 这里按资产编号取回原图（向服务端要新的下载链接；浏览器里已经有就直接命中缓存），再交给对应的动作。
+  // 取回期间禁用这几个按钮，进度显示在状态行（“正在载入图片 · N%”）；失败走统一的错误提示。
+  const [exporting, setExporting] = useState(false);
+  const fetchOriginal = useCallback(async (assetId: string): Promise<LocalAsset> => {
+    const key = `${assetId}:original`;
+    try {
+      const original = await api.asset(assetId);
+      return await api.image(original, undefined, trackImage(key));
+    } finally { finishImage(key); }
+  }, [api, trackImage, finishImage]);
+  const exportOriginal = async (assetId: string, action: (blob: Blob) => void | Promise<void>) => {
+    if (exporting) return;
+    setExporting(true);
+    try { await action((await fetchOriginal(assetId)).blob); } catch (e) { report(e); } finally { setExporting(false); }
   };
   // 把结果图交给海报页：先存进同源 IndexedDB 的待取区，再跳转。海报页只替换背景，不改已有文字。
   const makePoster = async (blob: Blob | undefined, name: string) => {
@@ -471,9 +487,9 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
             <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => { if (previewImage) downloadPng(previewImage.blob, `miaocut-candidate-${previewItem.index + 1}-${previewItem.result!.assetId}.png`); }}><Download size={17} />{c.downloadCandidate}</button>
             <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => void makePoster(previewImage?.blob, `candidate-${previewItem.index + 1}.png`)}>{c.makePoster}</button>
             <button type="button" className="secondary-button" disabled={!previewImage} onClick={() => void makeRecolor(previewImage?.blob, `candidate-${previewItem.index + 1}.png`)}>{c.makeRecolor}</button></div> :
-            offer?<div role="region" aria-label={locale==='zh'?'确认本次用量':'Confirm credits'}><p>{locale==='zh'?`本次 ${offer.units} 积分 · 当前可用 ${offer.availableCredits} 积分`:`${offer.units} credits · ${offer.availableCredits} available`}</p><p className="control-help">{offer.availableCredits<offer.units?(locale==='zh'?'可用积分不足，请前往账户补充积分。':'Insufficient credits. Add credits from your account.'):null}</p><p className="control-help">{locale==='zh'?'最终失败或取消排队后按账本释放预留积分。过期积分不会重新变为有效积分。':'A final failure or queued cancellation releases the reservation. Expired credits retain their expiry.'}</p><button type="button" className="primary-button" onClick={acceptOffer} disabled={execution!=='online'||offer.availableCredits<offer.units}>{locale==='zh'?`确认生成 · ${offer.units} 积分`:`Confirm · ${offer.units} credits`}</button><button type="button" className="sample-button" onClick={()=>setOffer(undefined)}>{locale==='zh'?'返回编辑':'Back to editing'}</button></div>:readonly && output ? <><button type="button" className="primary-button" onClick={() => downloadPng(output.blob, `miaocut-product-${record.result!.assetId}.png`)}><Download size={17} />{t.download}</button>
-            <button type="button" className="secondary-button" onClick={() => void makePoster(output.blob, `result-${record.result!.assetId}.png`)}>{c.makePoster}</button>
-            <button type="button" className="secondary-button" onClick={() => void makeRecolor(output.blob, `result-${record.result!.assetId}.png`)}>{c.makeRecolor}</button></> :
+            offer?<div role="region" aria-label={locale==='zh'?'确认本次用量':'Confirm credits'}><p>{locale==='zh'?`本次 ${offer.units} 积分 · 当前可用 ${offer.availableCredits} 积分`:`${offer.units} credits · ${offer.availableCredits} available`}</p><p className="control-help">{offer.availableCredits<offer.units?(locale==='zh'?'可用积分不足，请前往账户补充积分。':'Insufficient credits. Add credits from your account.'):null}</p><p className="control-help">{locale==='zh'?'最终失败或取消排队后按账本释放预留积分。过期积分不会重新变为有效积分。':'A final failure or queued cancellation releases the reservation. Expired credits retain their expiry.'}</p><button type="button" className="primary-button" onClick={acceptOffer} disabled={execution!=='online'||offer.availableCredits<offer.units}>{locale==='zh'?`确认生成 · ${offer.units} 积分`:`Confirm · ${offer.units} credits`}</button><button type="button" className="sample-button" onClick={()=>setOffer(undefined)}>{locale==='zh'?'返回编辑':'Back to editing'}</button></div>:readonly && output ? <><button type="button" className="primary-button" disabled={exporting} aria-busy={exporting} onClick={() => void exportOriginal(record.result!.assetId, blob => downloadPng(blob, `miaocut-product-${record.result!.assetId}.png`))}><Download size={17} />{t.download}</button>
+            <button type="button" className="secondary-button" disabled={exporting} onClick={() => void exportOriginal(record.result!.assetId, blob => makePoster(blob, `result-${record.result!.assetId}.png`))}>{c.makePoster}</button>
+            <button type="button" className="secondary-button" disabled={exporting} onClick={() => void exportOriginal(record.result!.assetId, blob => makeRecolor(blob, `result-${record.result!.assetId}.png`))}>{c.makeRecolor}</button></> :
             <><button type="button" className="primary-button" disabled={!connected || execution!=='online' || pricing?.admissionOpen===false || !!pending || quoting || uploadProgress !== null || !record.document.foregroundAssetId} onClick={() => void generate("product")}>{pending||quoting ? <LoaderCircle size={17} className="spinner" /> : null}{pending ? c.waiting : pricing?`${c.generate} · ${pricing.product}${locale==='zh'?' 积分':' credits'}`:c.generate}</button>
             {candidatesEnabled && pricing ? <button type="button" className="secondary-button" disabled={!connected || execution !== 'online' || pricing.admissionOpen === false || quoting || uploadProgress !== null || !record.document.foregroundAssetId || candidatesBusy} onClick={() => void generateCandidates()}>
               {candidatesBusy ? <><LoaderCircle size={15} className="spinner" />{c.candidateBusy}</> : `${c.candidates} · ${CANDIDATE_COUNT * pricing.product}${locale === 'zh' ? ' 积分' : ' credits'}`}</button> : null}</>}<p className="control-help">{pricing?(locale==='zh'?'以确认的报价为准':'The confirmed quote applies'):c.mode}</p></div></aside>
@@ -486,7 +502,8 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
       <footer className="workspace-footer"><a href="/workbench/product">{c.returnDemo}</a><span>{record.result ? c.viewResult : c.noResult}</span></footer>
       {comparisonId&&connected?<>
         {record.result&&compositionKey(record.document)!==compositionKey(record.result.document)?<p className="control-help">{locale==='zh'?'下方对比使用上次完成结果的构图，当前编辑稿保持不变。':'The comparison uses the completed result’s layout; your current draft is unchanged.'}</p>:null}
-        <SceneComparison document={comparisonDocument} foreground={asset?.id===comparisonId?asset:savedForeground?.id===comparisonId?savedForeground:undefined} ai={output?.blob} locale={locale}/>
+        <SceneComparison document={comparisonDocument} foreground={asset?.id===comparisonId?asset:savedForeground?.id===comparisonId?savedForeground:undefined} ai={output?.blob} aiIsPreview={output?.preview===true} locale={locale}
+          loadOriginal={{foreground:()=>fetchOriginal(comparisonId),ai:async()=>{if(!resultId)throw new ServiceError('asset_not_found',404);return (await fetchOriginal(resultId)).blob;}}}/>
       </>:null}
     </main></div>;
 }

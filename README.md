@@ -211,6 +211,7 @@ No image upload or render-job API is called. This mode must remain clearly label
 | `src/domain/batch.test.ts` | 上述逻辑的单元测试 |
 | `src/domain/service-contracts.ts` | 批量请求、报价、批次视图、“我的批次”列表摘要的类型 |
 | `src/domain/asset-loader.ts` | 服务端图片（结果图、抠图）的下载器：先看本地缓存，下载时盯“多久没收到字节”（默认 20 秒，卡死就掐掉重试）、最多重试 2 次（间隔 1、3 秒；403、404、410 不重试）、进度回调、字节必须对上服务端公布的大小和 SHA-256；缓存读写失败不影响下载。逻辑与浏览器全局无关，网络、缓存、哈希、等待都注入，`asset-loader.test.ts` 用假的网络逐条测 |
+| `src/domain/preview.ts` | 服务端预览图（WebP，长边最多 1024，registry 在任务完成时生成，资产上的可选字段 `preview`）在页面侧的规则：`previewDescriptor` 判断这份预览敢不敢用（WebP、指纹是 64 位小写十六进制、比原图小、https、整数尺寸、宽高比和原图一致，短边允许 1 像素舍入误差，任何一项不对就回退原图）；`sourceRect` 把商品在【原图】像素里的位置换算到实际解码出来的图里（没有缩放时逐字等于 `asset.bounds`）；`shouldFallBackToOriginal` 规定预览对象本身坏了（大小/指纹对不上、404/410）才改下原图，网络问题不重复等。**预览只用于显示：下载、做海报、换色、对比页的两个下载按钮都取原始 PNG**（`internal-workbench.tsx` 的 `exportOriginal`，对比页的 `loadOriginal`）；`LocalAsset.preview === true` 标记这是预览。`preview.test.ts` 逐条测，`scripts/preview-wiring.test.mjs` 盯接线 |
 | `src/domain/asset-cache.ts` | 把浏览器 Cache Storage 包成下载器用的缓存：按“资产编号 + 内容指纹”存（下载链接是预签名的，HTTP 缓存认不出同一张图），放在本站私有路径 `/workbench/_asset-cache/` 下，默认最多 40 张，超过先删最旧的；`clear()` 清空 |
 | `src/client/use-batch.ts` | 页面状态：上传与提取调度、轮询、报价与确认、停止 / 继续、重新生成、下载、“我的批次”列表与按 groupId 取回 |
 | `src/client/service-api.ts` | 批量使用与四候选相同的一组接口（`group-quotes`、`groups`），请求里 `kind` 为 `batch`；`batches(limit)` 读取我的批次列表 |

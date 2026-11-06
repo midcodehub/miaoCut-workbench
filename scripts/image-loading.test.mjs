@@ -13,19 +13,19 @@ const page = read("src/components/internal-workbench.tsx"), client = read("src/c
 test("the service client downloads images through the verified, retrying, cached loader and no longer reads the body by itself", () => {
   assert.match(client, /from "@\/domain\/asset-loader"/);
   assert.match(client, /createSharedLoader\(/, "one shared loader for the whole page, so the same image is never downloaded twice at the same time");
-  assert.match(client, /sharedImageLoader\(asset, \{ signal, onProgress \}\)/);
+  assert.match(client, /sharedImageLoader\(descriptor, \{ signal, onProgress \}\)/, "originals and previews both download through the one shared loader");
   assert.match(client, /browserAssetStore\(\)/);
   assert.ok(!/response\.blob\(\)/.test(client), "no direct response.blob() download path left in the client");
   assert.match(client, /new ServiceError\(error\.code, error\.status\)/, "loader errors keep their codes (asset_download_failed, asset_timeout, asset_mismatch)");
 });
 
 test("every image the internal workbench downloads reports progress and is released when the effect ends", () => {
-  const calls = [...page.matchAll(/api\.image\(/g)].length;
-  const tracked = [...page.matchAll(/api\.image\([^)]*trackImage\(/g)].length;
+  const calls = [...page.matchAll(/api\.(?:image|preview)\(/g)].length;
+  const tracked = [...page.matchAll(/api\.(?:image|preview)\([^)]*trackImage\(/g)].length;
   const untracked = [...page.matchAll(/api\.image\(result, controller\.signal\)/g)].length;   // 候选图（后台预取），不占状态行
-  assert.equal(tracked + untracked, calls, "each api.image( call is either tracked or a known background prefetch");
-  assert.equal(tracked, 3, "display image, result image and comparison image");
-  assert.equal([...page.matchAll(/finishImage\(/g)].length >= 9, true, "finished, failed and aborted loads all clear their progress entry");
+  assert.equal(tracked + untracked, calls, "each image()/preview() call is either tracked or a known background prefetch");
+  assert.equal(tracked, 4, "display image, result image and comparison image (previews), plus the original fetched for an export");
+  assert.equal([...page.matchAll(/finishImage\(/g)].length >= 10, true, "finished, failed, aborted and exported loads all clear their progress entry");
 });
 
 test("the loading text, the failure text and the reload button exist in both languages, and a failed load offers to reload", () => {

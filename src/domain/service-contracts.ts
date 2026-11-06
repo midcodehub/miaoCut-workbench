@@ -1,9 +1,12 @@
 import type { ProductDocument, Rect } from "./contracts";
 
+/** 服务端生成的“显示用”小图（WebP，长边最多 1024）。可选：旧资产、图太大、生成失败的都没有。只用于显示，不能当作导出。 */
+export interface ServiceAssetPreview { mime: "image/webp"; bytes: number; sha256: string; width: number; height: number; url: string }
 export interface ServiceAsset {
   assetId: string; mime: "image/png"; bytes: number; sha256: string; width: number; height: number;
   bounds: Rect; hasAlpha: boolean; transparent: boolean; sourceAssetId: string | null;
   expiresAt: number; url: string; urlExpiresAt: number;
+  preview?: ServiceAssetPreview;
 }
 export interface ServiceJobRequest {
   version: 1; requestId: string; kind: "segment" | "product";

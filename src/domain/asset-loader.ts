@@ -21,7 +21,8 @@
 //      为什么需要：缓存帮不上“同时”——第二个请求发出时第一个还没下完，缓存里还没有。2026-11-06 产品负责人的实测：打开页面下载了 3 次，
 //      浏览器里却只存了 2 张图：页面一挂载就同时启动三个下载（显示用的抠图、结果图、对比用的抠图），后两个“抠图”是同一张（2.7 MB），被同时下了两遍。
 
-export type AssetDescriptor = { assetId: string; url: string; bytes: number; sha256: string };
+/** mime 默认 image/png（原图）；预览图是 image/webp。它决定下载后 Blob 的类型，缓存里存的也是这个类型。 */
+export type AssetDescriptor = { assetId: string; url: string; bytes: number; sha256: string; mime?: "image/png" | "image/webp" };
 export type BlobStore = { get(key: string): Promise<Blob | undefined>; put(key: string, blob: Blob): Promise<void> };
 export type LoaderOptions = {
   /** 公布的大小上限（和旧下载器一样：32 MB）。 */
@@ -122,7 +123,7 @@ export async function loadAsset(asset: AssetDescriptor, deps: LoaderDeps, call: 
       if (bytes.length !== asset.bytes) { failure = new AssetLoadError("asset_mismatch"); continue; }
       const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
       if (await deps.sha256Hex(copy) !== asset.sha256) { failure = new AssetLoadError("asset_mismatch"); continue; }
-      const blob = new Blob([copy], { type: "image/png" });
+      const blob = new Blob([copy], { type: asset.mime ?? "image/png" });
       try { await deps.store?.put(key, blob); } catch { /* 写不进缓存不影响这次结果 */ }
       return { blob, fromCache: false };
     } finally {

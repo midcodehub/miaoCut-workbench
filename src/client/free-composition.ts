@@ -1,5 +1,6 @@
 import type {LocalAsset, ProductDocument} from '@/domain/contracts';
 import {comparisonRect, type FreeBackground} from '@/domain/comparison';
+import {sourceRect} from '@/domain/preview';
 import {imageFromUrl} from './assets';
 import {drawBackground, loadBackdrop} from './demo-renderer';
 
@@ -29,7 +30,8 @@ export async function renderFreeComposition(doc:ProductDocument, asset:LocalAsse
     const ctx=placed.getContext('2d');
     if(!ctx)throw new Error('canvas_unavailable');
     ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-    const b=asset.bounds;
+    // 商品在原图像素里的位置，换算到实际解码出来的图（可能是缩小的预览）里；没有缩放时就是 asset.bounds 本身。
+    const b=sourceRect(asset,image);
     ctx.drawImage(image,b.x,b.y,b.width,b.height,rect.x,rect.y,rect.width,rect.height);
     const engine=engineModule.default as unknown as {createEngine(sources:{cutout:HTMLCanvasElement}):LegacyEditor};
     const presets=presetModule.default as unknown as {createDefaultState():EditorState;applyShadowPreset(shadow:unknown,id:string):unknown};

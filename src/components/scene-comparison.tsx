@@ -8,8 +8,14 @@ import {renderFreeComposition} from '@/client/free-composition';
 import {downloadPng} from '@/client/assets';
 import {BlobImage} from './blob-image';
 
-export function SceneComparison({document:doc,foreground,ai,locale='zh'}:{
-  document:ProductDocument;foreground?:LocalAsset;ai?:Blob;locale?:Locale;
+/**
+ * foreground / ai 是页面上显示用的图，可能是服务端的缩小预览（foreground.preview === true / aiIsPreview）。
+ * 两个下载按钮必须给用户原始分辨率：loadOriginal 负责取回原图——AI 图直接下载原 PNG；
+ * 免费合成是在浏览器里用抠图画出来的，显示用的是预览画的那一张，下载时用完整分辨率的抠图重新合成一次。
+ */
+export function SceneComparison({document:doc,foreground,ai,aiIsPreview=false,loadOriginal,locale='zh'}:{
+  document:ProductDocument;foreground?:LocalAsset;ai?:Blob;aiIsPreview?:boolean;locale?:Locale;
+  loadOriginal?:{foreground:()=>Promise<LocalAsset>;ai:()=>Promise<Blob>};
 }) {
   const zh=locale==='zh',id=useId(),key=compositionKey(doc);
   const [background,setBackground]=useState<FreeBackground>('scene'),[wipe,setWipe]=useState(false),[position,setPosition]=useState(50),[attempt,setAttempt]=useState(0);
@@ -25,6 +31,27 @@ export function SceneComparison({document:doc,foreground,ai,locale='zh'}:{
   },[doc,foreground,background,key,attempt]);
   const local=rendered?.key===key&&rendered.background===background&&rendered.source===foreground?.blob?rendered.blob:undefined;
   const failed=!local&&failure?.key===key&&failure.background===background&&failure.source===foreground?.blob;
+  const [saving,setSaving]=useState<'free'|'ai'|null>(null),[saveFailed,setSaveFailed]=useState(false);
+  const saveFree=async()=>{
+    if(!local||saving)return;
+    setSaving('free');setSaveFailed(false);
+    try{
+      let blob=local;
+      if(foreground?.preview){
+        if(!loadOriginal)throw new Error('original_unavailable');
+        blob=await renderFreeComposition(doc,await loadOriginal.foreground(),background,new AbortController().signal);
+      }
+      downloadPng(blob,`miaocut-free-${doc.scene}.png`);
+    }catch{setSaveFailed(true);}finally{setSaving(null);}
+  };
+  const saveAi=async()=>{
+    if(!ai||saving)return;
+    setSaving('ai');setSaveFailed(false);
+    try{
+      if(aiIsPreview&&!loadOriginal)throw new Error('original_unavailable');
+      downloadPng(aiIsPreview&&loadOriginal?await loadOriginal.ai():ai,`miaocut-ai-${doc.scene}.png`);
+    }catch{setSaveFailed(true);}finally{setSaving(null);}
+  };
   const freeLabel=zh?'免费合成':'Free composition',aiLabel=zh?'AI 场景':'AI scene';
   const empty=failed?(zh?'免费合成未完成，请重试。':'Composition failed. Try again.'):
     foreground?(zh?'正在本地合成…':'Composing locally…'):(zh?'提取主体后可查看免费合成。':'Extract a subject to see the free composition.');
@@ -53,9 +80,10 @@ export function SceneComparison({document:doc,foreground,ai,locale='zh'}:{
         <div className="comparison-image">{ai?<BlobImage blob={ai} alt={aiLabel} width={1024} height={1024}/>:<div className="comparison-empty"><p>{zh?'AI 结果尚未生成。免费合成可以先使用。':'No AI result yet. You can use the free composition now.'}</p></div>}</div></figure>
     </div>}
     <div className="comparison-downloads">
-      <button type="button" className="secondary-button" disabled={!local} onClick={()=>{if(local)downloadPng(local,`miaocut-free-${doc.scene}.png`);}}><Download size={15}/>{zh?'下载免费合成':'Download free composition'}</button>
-      <button type="button" className="secondary-button" disabled={!ai} onClick={()=>{if(ai)downloadPng(ai,`miaocut-ai-${doc.scene}.png`);}}><Download size={15}/>{zh?'下载 AI 场景':'Download AI scene'}</button>
+      <button type="button" className="secondary-button" disabled={!local||saving!==null} aria-busy={saving==='free'} onClick={()=>void saveFree()}><Download size={15}/>{saving==='free'?(zh?'正在取回原图…':'Fetching original…'):(zh?'下载免费合成':'Download free composition')}</button>
+      <button type="button" className="secondary-button" disabled={!ai||saving!==null} aria-busy={saving==='ai'} onClick={()=>void saveAi()}><Download size={15}/>{saving==='ai'?(zh?'正在取回原图…':'Fetching original…'):(zh?'下载 AI 场景':'Download AI scene')}</button>
     </div>
+    {saveFailed?<p className="control-help" role="alert">{zh?'下载失败，请重试。':'Download failed. Try again.'}</p>:null}
     <p className="comparison-footnote">{zh?'对比使用同一前景和记录的构图。浏览器与服务端的缩放采样可能有细微差别；免费合成不重新运行抠图或生成模型。':'Both use the same foreground and recorded layout. Browser and server resizing may differ slightly. The free composition does not rerun segmentation or generation.'}</p>
   </section>;
 }
