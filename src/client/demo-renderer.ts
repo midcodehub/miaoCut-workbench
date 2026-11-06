@@ -4,7 +4,7 @@ import { ASSET_BASE, imageFromUrl } from "./assets";
 // Immutable, public scene image; no user data or server-side request state here.
 let backdropPromise: Promise<HTMLImageElement> | undefined;
 export function loadBackdrop() {
-  return backdropPromise ??= imageFromUrl(`${ASSET_BASE}/marble.png`).catch(error => {
+  return backdropPromise ??= imageFromUrl(`${ASSET_BASE}/marble.webp`).catch(error => {
     backdropPromise = undefined; throw error;
   });
 }
