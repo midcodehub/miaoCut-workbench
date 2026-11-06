@@ -3,7 +3,8 @@ import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
 import { serviceUrl } from "@/domain/service-url";
-import { AssetLoadError, createSharedLoader } from "@/domain/asset-loader";
+import { AssetLoadError, createSharedLoader, type AssetDescriptor } from "@/domain/asset-loader";
+import { previewDescriptor, shouldFallBackToOriginal } from "@/domain/preview";
 import { cacheBlobStore, type CacheBlobStore } from "@/domain/asset-cache";
 
 // 下载过的图按“资产编号 + 内容指纹”存在浏览器的 Cache Storage 里（见 domain/asset-cache.ts）：刷新、再次打开都不用重新下载。
@@ -82,12 +83,19 @@ export class WorkbenchService {
     return this.call<ServiceAsset>(`assets/${upload.assetId}/confirm`, {});
   }
   /**
-   * 下载一张服务端图片。命中本地缓存就不发请求；否则带“多久没收到字节”的卡死检测、最多 2 次重试和进度回调（见 domain/asset-loader.ts）。
-   * 字节对不上服务端公布的大小或 SHA-256 一律不要。失败时抛 ServiceError，code 是 asset_download_failed、asset_timeout 或 asset_mismatch。
+   * 下载并校验一张服务端图片（原图或预览，descriptor 说了算）。命中本地缓存就不发请求；否则带“多久没收到字节”的卡死检测、
+   * 最多 2 次重试和进度回调（见 domain/asset-loader.ts）。字节对不上公布的大小或 SHA-256 一律不要。
+   * 这是页面上唯一发起图片下载的地方，所以进度、缓存、“同一张只下一次”对预览同样生效。失败时抛 AssetLoadError。
+   */
+  private async fetchBlob(descriptor: AssetDescriptor, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void): Promise<Blob> {
+    return (await sharedImageLoader(descriptor, { signal, onProgress })).blob;
+  }
+  /**
+   * 原图（PNG）。下载、做海报、换色、对外导出都用它。失败时抛 ServiceError，code 是 asset_download_failed、asset_timeout 或 asset_mismatch。
    */
   async image(asset: ServiceAsset, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void): Promise<LocalAsset> {
     let blob: Blob;
-    try { ({ blob } = await sharedImageLoader(asset, { signal, onProgress })); }
+    try { blob = await this.fetchBlob(asset, signal, onProgress); }
     catch (error) {
       if (error instanceof AssetLoadError) throw new ServiceError(error.code, error.status);
       throw error;
@@ -95,6 +103,25 @@ export class WorkbenchService {
     // Service results can exceed the 10 MB source-upload limit; canvas uses trusted server geometry.
     return { id: asset.assetId, name: "product.png", blob, width: asset.width, height: asset.height,
       bounds: asset.bounds, transparent: asset.transparent, origin: "upload" };
+  }
+  /**
+   * 显示用的图：服务端给了可信的 WebP 预览就下预览（几十～一百多 KB），否则下原图。
+   * 返回的 LocalAsset 带 preview: true；width / height / bounds 仍然是【原图】的，画图时按实际解码尺寸换算（domain/preview.ts 的 sourceRect）。
+   * 预览对象本身坏了（大小或指纹对不上、404/410）时改下原图，而不是让页面空着；网络问题不重复等（见 shouldFallBackToOriginal）。
+   * ⚠ 这个 Blob 只能用来显示，不能下载、做海报或换色——那些要调 image() 取原图。
+   */
+  async preview(asset: ServiceAsset, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void): Promise<LocalAsset> {
+    const descriptor = previewDescriptor(asset);
+    if (!descriptor) return this.image(asset, signal, onProgress);
+    let blob: Blob;
+    try { blob = await this.fetchBlob(descriptor, signal, onProgress); }
+    catch (error) {
+      if (shouldFallBackToOriginal(error)) return this.image(asset, signal, onProgress);
+      if (error instanceof AssetLoadError) throw new ServiceError(error.code, error.status);
+      throw error;
+    }
+    return { id: asset.assetId, name: "product-preview.webp", blob, width: asset.width, height: asset.height,
+      bounds: asset.bounds, transparent: asset.transparent, origin: "upload", preview: true };
   }
 }
 export async function canonicalPng(file: File): Promise<Blob> {

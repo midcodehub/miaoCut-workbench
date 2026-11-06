@@ -267,3 +267,25 @@ test("once a shared download has finished, the next caller is served by the stor
   assert.equal(requests, 1);
   assert.equal(later.fromCache, true);
 });
+
+test("the downloaded blob carries the image type the server announced (WebP previews are not mislabelled as PNG), and PNG stays the default", async () => {
+  const content = bytesOf("pretend webp bytes");
+  const webp = await descriptor(content, { mime: "image/webp" }), png = await descriptor(content);
+  const { store, map } = memoryStore();
+  const a = await loadAsset(webp, baseDeps(async () => okResponse(content), { store }), {});
+  const b = await loadAsset({ ...png, assetId: "22222222-2222-4222-8222-222222222222" }, baseDeps(async () => okResponse(content), { store }), {});
+  assert.equal(a.blob.type, "image/webp"); assert.equal(map.get(assetKey(webp))!.type, "image/webp", "and it is stored with that type");
+  assert.equal(b.blob.type, "image/png");
+});
+
+test("a preview and its original are different cache entries (same asset id, different fingerprint) and never serve each other", async () => {
+  const original = bytesOf("the big original png bytes"), small = bytesOf("small preview");
+  const big = await descriptor(original), preview = await descriptor(small, { mime: "image/webp", url: "https://r2.example/preview.webp" });
+  assert.notEqual(assetKey(big), assetKey(preview));
+  const { store } = memoryStore(); let requests = 0;
+  const deps = baseDeps(async url => { requests++; return okResponse(url.includes("preview") ? small : original); }, { store });
+  const first = await loadAsset(preview, deps, {}), second = await loadAsset(big, deps, {});
+  assert.equal(first.blob.size, small.length); assert.equal(second.blob.size, original.length);
+  assert.equal(requests, 2, "the original is still fetched when it is asked for (download), even after the preview was cached");
+  assert.equal((await loadAsset(preview, deps, {})).fromCache, true); assert.equal(requests, 2);
+});

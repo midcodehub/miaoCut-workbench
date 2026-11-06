@@ -33,6 +33,11 @@ export interface LocalAsset {
   bounds: Rect;
   transparent: boolean;
   origin: "example" | "upload";
+  /**
+   * true：blob 是服务端 WebP 预览（缩小过，只用于显示）。width / height / bounds 仍然描述【原图】，
+   * 画图时要按实际解码尺寸换算（domain/preview.ts 的 sourceRect）。导出（下载、海报、换色）必须取原图，不能用这个 blob。
+   */
+  preview?: boolean;
 }
 export interface DemoJob {
   id: string;

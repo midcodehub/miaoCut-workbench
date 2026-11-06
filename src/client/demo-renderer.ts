@@ -1,4 +1,5 @@
 import type { DemoJob, LocalAsset, ProductDocument, SceneId } from "@/domain/contracts";
+import { sourceRect } from "@/domain/preview";
 import { ASSET_BASE, imageFromUrl } from "./assets";
 
 // Immutable, public scene image; no user data or server-side request state here.
@@ -56,7 +57,8 @@ export function drawComposition(ctx: CanvasRenderingContext2D, document: Product
     ctx.restore();
   }
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-  const crop = asset.bounds;
+  // 商品在原图像素里的位置，换算到实际解码出来的图（可能是缩小的预览）里；没有缩放时就是 asset.bounds 本身。
+  const crop = sourceRect(asset, image);
   ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height,
     rect.x * size, rect.y * size, rect.width * size, rect.height * size);
   ctx.restore();
