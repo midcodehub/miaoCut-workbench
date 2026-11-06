@@ -3,6 +3,19 @@ import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
 import { serviceUrl } from "@/domain/service-url";
+import { AssetLoadError, loadAsset } from "@/domain/asset-loader";
+import { cacheBlobStore, type CacheBlobStore } from "@/domain/asset-cache";
+
+// 下载过的图按“资产编号 + 内容指纹”存在浏览器的 Cache Storage 里（见 domain/asset-cache.ts）：刷新、再次打开都不用重新下载。
+// Cache Storage 只在安全上下文（https、localhost）里有；没有就不缓存，下载本身照常工作。
+let assetStore: CacheBlobStore | undefined | null = null;
+export function browserAssetStore(): CacheBlobStore | undefined {
+  if (assetStore !== null) return assetStore;
+  assetStore = typeof caches === "undefined" || typeof location === "undefined" ? undefined
+    : cacheBlobStore(() => caches.open("mc-workbench-assets-v1") as unknown as Promise<import("@/domain/asset-cache").CacheLike>, { origin: location.origin });
+  return assetStore;
+}
+const sha256Hex = async (data: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), n => n.toString(16).padStart(2, "0")).join("");
 
 export class ServiceError extends Error {
   constructor(readonly code: string, readonly status = 0) { super(code); }
@@ -58,13 +71,26 @@ export class WorkbenchService {
     });
     return this.call<ServiceAsset>(`assets/${upload.assetId}/confirm`, {});
   }
-  async image(asset: ServiceAsset, signal?: AbortSignal): Promise<LocalAsset> {
-    const response = await fetch(asset.url, { signal, redirect: "error", credentials: "omit", cache: "no-store" });
-    if (!response.ok) throw new ServiceError("asset_download_failed", response.status);
-    const blob = await response.blob();
-    if (blob.size !== asset.bytes || blob.size > 32 * 1024 * 1024) throw new ServiceError("asset_mismatch");
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())), n => n.toString(16).padStart(2, "0")).join("");
-    if (digest !== asset.sha256) throw new ServiceError("asset_mismatch");
+  /**
+   * 下载一张服务端图片。命中本地缓存就不发请求；否则带“多久没收到字节”的卡死检测、最多 2 次重试和进度回调（见 domain/asset-loader.ts）。
+   * 字节对不上服务端公布的大小或 SHA-256 一律不要。失败时抛 ServiceError，code 是 asset_download_failed、asset_timeout 或 asset_mismatch。
+   */
+  async image(asset: ServiceAsset, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void): Promise<LocalAsset> {
+    let blob: Blob;
+    try {
+      ({ blob } = await loadAsset(asset, {
+        fetchAsset: (url, attempt) => fetch(url, { signal: attempt, redirect: "error", credentials: "omit", cache: "no-store" }),
+        sha256Hex, store: browserAssetStore(),
+        sleep: (ms, abort) => new Promise<void>((resolve, reject) => {
+          if (abort.aborted) { reject(abort.reason); return; }
+          const timer = setTimeout(() => { abort.removeEventListener("abort", stop); resolve(); }, ms), stop = () => { clearTimeout(timer); reject(abort.reason); };
+          abort.addEventListener("abort", stop, { once: true });
+        }),
+      }, { signal, onProgress }));
+    } catch (error) {
+      if (error instanceof AssetLoadError) throw new ServiceError(error.code, error.status);
+      throw error;
+    }
     // Service results can exceed the 10 MB source-upload limit; canvas uses trusted server geometry.
     return { id: asset.assetId, name: "product.png", blob, width: asset.width, height: asset.height,
       bounds: asset.bounds, transparent: asset.transparent, origin: "upload" };

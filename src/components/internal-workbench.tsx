@@ -38,6 +38,7 @@ const copy = {
     candidateRule: "积分逐张预留：完成一张扣一张，未完成或停止的不扣。确认时可用积分需要覆盖全部预算。", candidateConfirm: (u: number) => `确认生成 · 最多 ${u} 积分`,
     candidateBusy: "候选正在生成", previewing: (n: number) => `候选 ${n}`, backToDraft: "返回编辑稿", choose: "设为选定版本", downloadCandidate: "下载这张",
     makePoster: "做成海报", makeRecolor: "精确换色",
+    loadingImage: "正在载入图片", imageFailed: "图片没有载入成功（网络较慢或中断，已自动重试过）。任务本身不受影响，可以重新载入。", retryImage: "重新载入图片",
     storage: "浏览器无法保存任务记录，请恢复存储权限后重试。", expired: "素材或结果已失效，请重新上传商品。历史任务不会自动重新执行。", mode: "内部测试 · 不扣积分", returnDemo: "返回交互演示", cancelRace: "任务已开始，当前无法取消；正在继续查询。",
   },
   en: {
@@ -57,6 +58,7 @@ const copy = {
     candidateRule: "Credits are reserved one image at a time and charged only for completed images. Your balance must cover the full budget to start.", candidateConfirm: (u: number) => `Confirm · up to ${u} credits`,
     candidateBusy: "Candidates in progress", previewing: (n: number) => `Candidate ${n}`, backToDraft: "Back to draft", choose: "Use this version", downloadCandidate: "Download this one",
     makePoster: "Make a poster", makeRecolor: "Exact recolour",
+    loadingImage: "Loading the image", imageFailed: "The image did not load (slow or interrupted connection; it was retried automatically). The job itself is not affected; you can load it again.", retryImage: "Load the image again",
     storage: "The browser cannot save job records. Restore storage access and try again.", expired: "The asset or result is unavailable. Upload the product again; old jobs will not restart automatically.", mode: "Internal test · No credits", returnDemo: "Back to interactive demo", cancelRace: "The job has started and can no longer be cancelled. Status checks continue.",
   },
 };
@@ -76,8 +78,14 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   const [record, setRecord] = useState<InternalDraft>({ version: 1, document: emptyWorkspace().document, view: "draft" });
   const current = useRef(record), uploadLock = useRef(false);
   const [connected, setConnected] = useState(false), [locale, setLocale] = useState<Locale>("zh"), [dark, setDark] = useState(false);
-  const [error, setError] = useState<"login" | "access" | "error" | "storage" | "failed" | "queueExpired" | "expired" | "cancelRace" | "insufficient" | "quoteExpired" | "paused" | "offline" | "unknown" | null>(null);
+  const [error, setError] = useState<"login" | "access" | "error" | "storage" | "failed" | "queueExpired" | "expired" | "cancelRace" | "insufficient" | "quoteExpired" | "paused" | "offline" | "unknown" | "imageFailed" | null>(null);
   const [serverJob, setServerJob] = useState<ServiceJob | null>(null), [resume, setResume] = useState(0);
+  // 图片下载进度（按资产编号：已下载字节、总字节）和“重新载入图片”的计数；下载器本身见 domain/asset-loader.ts。
+  const [imageLoads, setImageLoads] = useState<Record<string, [number, number]>>({}), [imageRetry, setImageRetry] = useState(0);
+  const trackImage = useCallback((id: string) => (loaded: number, total: number) => setImageLoads(all => ({ ...all, [id]: [loaded, total] })), []);
+  const finishImage = useCallback((id: string) => setImageLoads(all => { if (!(id in all)) return all; const rest = { ...all }; delete rest[id]; return rest; }), []);
+  const imageTotal = Object.values(imageLoads).reduce((sum, [, total]) => sum + total, 0);
+  const imagePercent = imageTotal > 0 ? Math.min(99, Math.floor(Object.values(imageLoads).reduce((sum, [loaded]) => sum + loaded, 0) / imageTotal * 100)) : Object.keys(imageLoads).length ? 0 : null;
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [asset, setAsset] = useState<LocalAsset>(), [result, setResult] = useState<LocalAsset>();
   const [execution,setExecution]=useState<ServiceExecution['status']>('unknown');
@@ -100,6 +108,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   }, [storageKey]);
   const report = useCallback((problem: unknown) => {
     setError(problem instanceof ServiceError && problem.status === 401 ? "login" :
+      problem instanceof ServiceError && ["asset_download_failed", "asset_timeout", "asset_mismatch"].includes(problem.code) ? "imageFailed" :
       problem instanceof ServiceError && problem.code==='internal_access_required'?'access':
       problem instanceof ServiceError && problem.code==='billing_paused'?'paused':
       problem instanceof ServiceError && problem.code==='quote_expired'?'quoteExpired':
@@ -269,31 +278,34 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   useEffect(() => {
     if (!connected || !displayAssetId) return;
     const controller = new AbortController();
-    void api.asset(displayAssetId, controller.signal).then(a => api.image(a, controller.signal)).then(image => {
+    void api.asset(displayAssetId, controller.signal).then(a => api.image(a, controller.signal, trackImage(displayAssetId))).then(image => {
+      finishImage(displayAssetId);
       if (!controller.signal.aborted) setAsset(image);
-    }).catch(e => { if (!controller.signal.aborted) report(e); });
-    return () => controller.abort();
-  }, [api, displayAssetId, connected, report]);
+    }).catch(e => { finishImage(displayAssetId); if (!controller.signal.aborted) report(e); });
+    return () => { controller.abort(); finishImage(displayAssetId); };
+  }, [api, displayAssetId, connected, report, imageRetry, trackImage, finishImage]);
   const resultId = record.result?.assetId;
   useEffect(() => {
     if (!connected || !resultId) return;
     const controller = new AbortController();
-    void api.asset(resultId, controller.signal).then(a => api.image(a, controller.signal)).then(image => {
+    void api.asset(resultId, controller.signal).then(a => api.image(a, controller.signal, trackImage(resultId))).then(image => {
+      finishImage(resultId);
       if (!controller.signal.aborted) setResult(image);
-    }).catch(e => { if (!controller.signal.aborted) report(e); });
-    return () => controller.abort();
-  }, [api, resultId, connected, report]);
+    }).catch(e => { finishImage(resultId); if (!controller.signal.aborted) report(e); });
+    return () => { controller.abort(); finishImage(resultId); };
+  }, [api, resultId, connected, report, imageRetry, trackImage, finishImage]);
 
   const comparisonDocument=record.result?.document||record.document;
   const comparisonId=comparisonDocument.foregroundAssetId;
   useEffect(()=>{
     if(!connected||!comparisonId||asset?.id===comparisonId)return;
     const controller=new AbortController();
-    void api.asset(comparisonId,controller.signal).then(a=>api.image(a,controller.signal)).then(a=>{
+    void api.asset(comparisonId,controller.signal).then(a=>api.image(a,controller.signal,trackImage(comparisonId))).then(a=>{
+      finishImage(comparisonId);
       if(!controller.signal.aborted)setSavedForeground(a);
-    }).catch(e=>{if(!controller.signal.aborted)report(e);});
-    return ()=>controller.abort();
-  },[api,connected,comparisonId,asset,report]);
+    }).catch(e=>{finishImage(comparisonId);if(!controller.signal.aborted)report(e);});
+    return ()=>{controller.abort();finishImage(comparisonId);};
+  },[api,connected,comparisonId,asset,report,imageRetry,trackImage,finishImage]);
 
   const edit = (patch: Partial<ProductDocument>) => {
     if (!connected) return;
@@ -419,7 +431,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
   const output = connected && result?.id === resultId ? result : undefined;
   const displayDocument = readonly ? record.result!.document : record.document;
   const limits = visibleAsset ? sizeLimits(visibleAsset) : { min: .2, max: .92 };
-  const status = uploadProgress !== null ? `${c.uploading} · ${uploadProgress}%` : pending ?
+  const status = uploadProgress !== null ? `${c.uploading} · ${uploadProgress}%` : imagePercent !== null && !pending ? `${c.loadingImage} · ${imagePercent}%` : pending ?
     !currentJob || currentJob.state === "queued" ? currentJob?.queue?.workerOnline === false ? c.queueOffline : c.queued : currentJob.state === "settling" ? (locale==='zh'?'正在确认积分结算':'Confirming credit settlement') : currentJob.state === "verifying" ? c.verifying : pending.request.kind === "segment" ? c.segment : c.product :
     serverJob?.state === "cancelled" ? c.cancelled : serverJob?.state === "succeeded" ? c.done : connected ? c.ready : c.connecting;
   const move = (placement: Rect) => edit({ placement });
@@ -431,7 +443,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
       <div className="demo-notice">{pricing?(locale==='zh'?`内测：主体提取 ${pricing.segment} 积分，每张场景图 ${pricing.product} 积分。确认报价后预留积分，完成后扣减。`:`Internal test: extraction ${pricing.segment} credits; each scene ${pricing.product} credits. Credits are reserved after confirmation and charged on completion.`):c.notice}</div>
       {pricing?.admissionOpen===false?<div className="demo-notice" role="status">{c.paused}</div>:null}
       {connected&&execution!=='online'?<div className="demo-notice" role="status">{c[execution]}</div>:null}
-      {error ? <div className="error-notice" role="alert"><span>{c[error]}</span>{(error === "login" || error === "access") ? <a href={accountConfigured()?'/workbench/login':"https://miaocut.app/account/"}>{c.account}</a> : <button type="button" className="subtle-button" onClick={() => { setError(null); setResume(n => n + 1); }}>{c.resume}</button>}</div> : null}
+      {error ? <div className="error-notice" role="alert"><span>{c[error]}</span>{(error === "login" || error === "access") ? <a href={accountConfigured()?'/workbench/login':"https://miaocut.app/account/"}>{c.account}</a> : <button type="button" className="subtle-button" onClick={() => { setError(null); if (error === "imageFailed") setImageRetry(n => n + 1); else setResume(n => n + 1); }}>{error === "imageFailed" ? c.retryImage : c.resume}</button>}</div> : null}
       <div className="workspace-grid"><aside className="side-panel asset-panel"><div className="panel-section"><h2>{t.assetTitle}</h2>
         <input ref={input} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f); e.currentTarget.value = ""; }} />
         <button type="button" className="upload-zone" disabled={!connected || execution!=='online' || pricing?.admissionOpen===false || !!pending || quoting || uploadProgress !== null} onClick={() => input.current?.click()}>{visibleAsset ? <span className="asset-thumbnail checkerboard"><BlobImage blob={visibleAsset.blob} alt={t.assetTitle} /></span> : <Upload size={24} />}<span>{visibleAsset ? t.replace : c.upload}</span></button><p className="control-help">{c.uploadHint}</p><p className="control-help">{record.document.sourceAssetId ? c.sourceSaved : c.noSubject}</p>
@@ -468,7 +480,7 @@ export function InternalWorkbench({ sessionKey }: { sessionKey: string }) {
       </div>
       {groupView && groupRecord && groupMatches(groupView, groupRecord) ? <CandidateStrip group={groupView} images={candidateImages} preview={preview} selectedAssetId={record.result?.assetId}
         locale={locale} busy={groupBusy} onPreview={index => setPreview(current => current === index ? null : index)} onStop={() => void groupAction("stop")} onResume={() => void groupAction("resume")} /> : null}
-      <div className="job-status" role="status" aria-live="polite"><span className="job-status-leading">{pending || uploadProgress !== null ? <LoaderCircle size={15} className="spinner" /> : <Check size={15} />}{status}</span>
+      <div className="job-status" role="status" aria-live="polite"><span className="job-status-leading">{pending || uploadProgress !== null || imagePercent !== null ? <LoaderCircle size={15} className="spinner" /> : <Check size={15} />}{status}</span>
         {billingMessage?<span>{billingMessage}</span>:null}
         {pending?.jobId && currentJob?.state === "queued" ? <button type="button" onClick={() => void cancel()}>{c.cancel}</button> : null}</div>
       <footer className="workspace-footer"><a href="/workbench/product">{c.returnDemo}</a><span>{record.result ? c.viewResult : c.noResult}</span></footer>
