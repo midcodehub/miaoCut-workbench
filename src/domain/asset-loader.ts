@@ -16,6 +16,10 @@
 //   4. 字节对不上服务端公布的大小或 SHA-256 的一律不要，也不写缓存。
 //   5. 调用方离开（abort）就立刻停：不重试、不再发请求、不写缓存。
 //   6. 缓存读写失败（存储不可用、配额满）不能让一次本来成功的下载失败。
+//   7. 同一张图同时被多处要（createSharedLoader）：只下一次，大家共用；进度广播给所有人，晚加入的立刻补上当前进度；
+//      有人离开不影响还在等的人，只有所有人都离开了才真正掐断连接。
+//      为什么需要：缓存帮不上“同时”——第二个请求发出时第一个还没下完，缓存里还没有。2026-11-06 产品负责人的实测：打开页面下载了 3 次，
+//      浏览器里却只存了 2 张图：页面一挂载就同时启动三个下载（显示用的抠图、结果图、对比用的抠图），后两个“抠图”是同一张（2.7 MB），被同时下了两遍。
 
 export type AssetDescriptor = { assetId: string; url: string; bytes: number; sha256: string };
 export type BlobStore = { get(key: string): Promise<Blob | undefined>; put(key: string, blob: Blob): Promise<void> };
@@ -126,4 +130,51 @@ export async function loadAsset(asset: AssetDescriptor, deps: LoaderDeps, call: 
     }
   }
   throw failure;
+}
+
+export type LoadResult = { blob: Blob; fromCache: boolean };
+export type ProgressFn = (loaded: number, total: number) => void;
+
+type Shared = { promise: Promise<LoadResult>; controller: AbortController; listeners: Set<ProgressFn>; callers: number; last?: [number, number] };
+
+/**
+ * 在 loadAsset 外面包一层“同一张图只下一次”：key 是 assetKey（资产编号 + 内容指纹）。
+ * deps 用函数给（每次真正下载时才取），因为浏览器缓存对象要到调用时才存在。
+ */
+export function createSharedLoader(deps: () => LoaderDeps) {
+  const inflight = new Map<string, Shared>();
+  return function load(asset: AssetDescriptor, call: LoadCall = {}): Promise<LoadResult> {
+    const { signal, onProgress } = call;
+    if (signal?.aborted) return Promise.reject(aborted(signal));
+    const key = assetKey(asset);
+    let shared = inflight.get(key);
+    if (!shared) {
+      const created: Shared = { promise: undefined as unknown as Promise<LoadResult>, controller: new AbortController(), listeners: new Set(), callers: 0 };
+      created.promise = loadAsset(asset, deps(), { signal: created.controller.signal, onProgress: (loaded, total) => {
+        created.last = [loaded, total];
+        for (const listener of [...created.listeners]) listener(loaded, total);
+      } }).finally(() => { if (inflight.get(key) === created) inflight.delete(key); });
+      created.promise.catch(() => {});                       // 全员离开后它会以 AbortError 结束，这里不让它变成未处理的拒绝
+      inflight.set(key, created); shared = created;
+    }
+    const entry = shared;
+    entry.callers++;
+    if (onProgress) { entry.listeners.add(onProgress); if (entry.last) onProgress(...entry.last); }
+    return new Promise<LoadResult>((resolve, reject) => {
+      let done = false;
+      const leave = () => {
+        if (onProgress) entry.listeners.delete(onProgress);
+        signal?.removeEventListener("abort", onAbort);
+        if (--entry.callers === 0) {
+          if (inflight.get(key) === entry) inflight.delete(key);   // 先摘掉再掐断：之后来的人要开一次新的下载，不能继承一个已经被取消的
+          entry.controller.abort();
+        }
+      };
+      const onAbort = () => { if (done) return; done = true; leave(); reject(aborted(signal)); };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      entry.promise.then(
+        result => { if (done) return; done = true; leave(); resolve(result); },
+        error => { if (done) return; done = true; leave(); reject(error); });
+    });
+  };
 }

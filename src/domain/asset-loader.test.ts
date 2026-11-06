@@ -5,7 +5,7 @@
 // 下载中途卡住时页面既不报错也不重试。这里用假的网络、假的缓存、假的时钟把这些行为逐条钉住。
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AssetLoadError, DEFAULT_LOADER_OPTIONS, assetKey, loadAsset, type AssetDescriptor, type BlobStore, type LoaderDeps } from "./asset-loader";
+import { AssetLoadError, DEFAULT_LOADER_OPTIONS, assetKey, createSharedLoader, loadAsset, type AssetDescriptor, type BlobStore, type LoaderDeps } from "./asset-loader";
 
 const bytesOf = (text: string) => new TextEncoder().encode(text);
 const hex = async (data: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data as BufferSource)), n => n.toString(16).padStart(2, "0")).join("");
@@ -163,4 +163,107 @@ test("the defaults are the numbers the page relies on", () => {
   assert.ok(DEFAULT_LOADER_OPTIONS.stallMs >= 10_000 && DEFAULT_LOADER_OPTIONS.stallMs <= 30_000, "long enough for a slow link, short enough to notice a stall");
   assert.equal(DEFAULT_LOADER_OPTIONS.retries, 2);
   assert.equal(DEFAULT_LOADER_OPTIONS.backoffMs.length, DEFAULT_LOADER_OPTIONS.retries);
+});
+
+// —— 同一张图的并发下载共用一次 ——
+// 2026-11-06 产品负责人的实测：打开页面时下载了 3 次，浏览器里却只存了 2 张图（结果图 1115 KB、抠图 2700 KB）。
+// 页面一挂载就同时启动三个下载（显示用的抠图、结果图、对比用的抠图），后两个“抠图”其实是同一张，被同时下了两遍（4.1 秒和 3.7 秒，在抢带宽）。
+// 缓存帮不上：第二个请求发出时第一个还没下完，缓存里还没有。所以要让“同一张图正在下载”这件事被共用。
+const gated = (content: Uint8Array) => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const response = new Response(new ReadableStream<Uint8Array>({
+    async start(controller) { controller.enqueue(content.slice(0, 4)); await gate; controller.enqueue(content.slice(4)); controller.close(); },
+  }));
+  return { response, release };
+};
+const tick = (ms = 15) => new Promise(resolve => setTimeout(resolve, ms));
+
+test("two callers asking for the same asset at the same time share one download and both get the bytes and the progress", async () => {
+  const content = bytesOf("shared between the display effect and the comparison effect");
+  const asset = await descriptor(content), { response, release } = gated(content);
+  let requests = 0;
+  const load = createSharedLoader(() => baseDeps(async () => { requests++; return response; }));
+  const first: number[] = [], second: number[] = [];
+  const a = load(asset, { onProgress: (loaded) => first.push(loaded) }), b = load(asset, { onProgress: (loaded) => second.push(loaded) });
+  await tick(); release();
+  const [one, two] = await Promise.all([a, b]);
+  assert.equal(requests, 1, "one request for two callers");
+  assert.equal(one.blob.size, content.length);
+  assert.equal(two.blob, one.blob, "both get the very same blob");
+  assert.equal(first.at(-1), content.length);
+  assert.equal(second.at(-1), content.length, "the second caller sees the progress too");
+});
+
+test("a caller that joins late is told how far the download already is, instead of seeing nothing until the next chunk", async () => {
+  const content = bytesOf("late joiner gets the current progress");
+  const asset = await descriptor(content), { response, release } = gated(content);
+  const load = createSharedLoader(() => baseDeps(async () => response));
+  const early = load(asset, {});
+  await tick();                                                    // 前 4 个字节已经到了
+  const seen: Array<[number, number]> = [];
+  const late = load(asset, { onProgress: (loaded, total) => seen.push([loaded, total]) });
+  assert.deepEqual(seen[0], [4, content.length], "replayed at once");
+  release(); await Promise.all([early, late]);
+});
+
+test("one caller leaving does not cancel the download the other one still needs", async () => {
+  const content = bytesOf("the other caller is still waiting for this");
+  const asset = await descriptor(content), { response, release } = gated(content), leaving = new AbortController();
+  let fetchSignal: AbortSignal | undefined;
+  const load = createSharedLoader(() => baseDeps(async (_url, signal) => { fetchSignal = signal; return response; }));
+  const staying = load(asset, {}), leaver = load(asset, { signal: leaving.signal });
+  await tick(); leaving.abort();
+  await assert.rejects(leaver, (error: unknown) => (error as Error).name === "AbortError");
+  assert.equal(fetchSignal!.aborted, false, "the shared request keeps running");
+  release();
+  assert.equal((await staying).blob.size, content.length);
+});
+
+test("when every caller has left, the shared download is really cancelled, and the next caller starts a fresh one", async () => {
+  const content = bytesOf("nobody wants this any more");
+  const asset = await descriptor(content), first = gated(content), second = gated(content), a = new AbortController(), b = new AbortController();
+  const signals: AbortSignal[] = []; let requests = 0;
+  const load = createSharedLoader(() => baseDeps(async (_url, signal) => { signals.push(signal); return ++requests === 1 ? first.response : second.response; }));
+  const one = load(asset, { signal: a.signal }), two = load(asset, { signal: b.signal });
+  await tick(); a.abort(); assert.equal(signals[0].aborted, false); b.abort();
+  await assert.rejects(one); await assert.rejects(two);
+  assert.equal(signals[0].aborted, true, "the connection is cut once nobody is waiting");
+  const again = load(asset, {});
+  await tick(); second.release();
+  assert.equal((await again).blob.size, content.length);
+  assert.equal(requests, 2, "a new caller after everyone left starts a new download instead of inheriting the cancelled one");
+});
+
+test("different assets never share a download", async () => {
+  const content = bytesOf("same bytes, different asset");
+  const one = await descriptor(content), two = await descriptor(content, { assetId: "22222222-2222-4222-8222-222222222222" });
+  let requests = 0;
+  const load = createSharedLoader(() => baseDeps(async () => { requests++; return okResponse(content); }));
+  await Promise.all([load(one, {}), load(two, {})]);
+  assert.equal(requests, 2);
+});
+
+test("a failed shared download fails every waiting caller with the same error, and the next call tries again", async () => {
+  const content = bytesOf("fails once, then works");
+  const asset = await descriptor(content);
+  let requests = 0; let failing = true;
+  const load = createSharedLoader(() => baseDeps(async () => { requests++; return failing ? new Response("gone", { status: 404 }) : okResponse(content); }));
+  const results = await Promise.allSettled([load(asset, {}), load(asset, {})]);
+  assert.ok(results.every(result => result.status === "rejected" && (result.reason as AssetLoadError).code === "asset_download_failed"));
+  assert.equal(requests, 1, "one request failed for both callers");
+  failing = false;
+  assert.equal((await load(asset, {})).blob.size, content.length);
+  assert.equal(requests, 2);
+});
+
+test("once a shared download has finished, the next caller is served by the store and the shared entry is gone", async () => {
+  const content = bytesOf("served from the store the second time");
+  const asset = await descriptor(content), { store } = memoryStore();
+  let requests = 0;
+  const load = createSharedLoader(() => baseDeps(async () => { requests++; return okResponse(content); }, { store }));
+  await Promise.all([load(asset, {}), load(asset, {})]);
+  const later = await load(asset, {});
+  assert.equal(requests, 1);
+  assert.equal(later.fromCache, true);
 });

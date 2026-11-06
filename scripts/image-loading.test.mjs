@@ -12,7 +12,8 @@ const page = read("src/components/internal-workbench.tsx"), client = read("src/c
 
 test("the service client downloads images through the verified, retrying, cached loader and no longer reads the body by itself", () => {
   assert.match(client, /from "@\/domain\/asset-loader"/);
-  assert.match(client, /loadAsset\(/);
+  assert.match(client, /createSharedLoader\(/, "one shared loader for the whole page, so the same image is never downloaded twice at the same time");
+  assert.match(client, /sharedImageLoader\(asset, \{ signal, onProgress \}\)/);
   assert.match(client, /browserAssetStore\(\)/);
   assert.ok(!/response\.blob\(\)/.test(client), "no direct response.blob() download path left in the client");
   assert.match(client, /new ServiceError\(error\.code, error\.status\)/, "loader errors keep their codes (asset_download_failed, asset_timeout, asset_mismatch)");

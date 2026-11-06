@@ -3,7 +3,7 @@ import type { ServiceAsset, ServiceBatch, ServiceBatchQuote, ServiceBatchRequest
 import { AssetError, decodeAsset, imageFromUrl } from "./assets";
 import {accountToken} from './account-auth';
 import { serviceUrl } from "@/domain/service-url";
-import { AssetLoadError, loadAsset } from "@/domain/asset-loader";
+import { AssetLoadError, createSharedLoader } from "@/domain/asset-loader";
 import { cacheBlobStore, type CacheBlobStore } from "@/domain/asset-cache";
 
 // 下载过的图按“资产编号 + 内容指纹”存在浏览器的 Cache Storage 里（见 domain/asset-cache.ts）：刷新、再次打开都不用重新下载。
@@ -16,6 +16,16 @@ export function browserAssetStore(): CacheBlobStore | undefined {
   return assetStore;
 }
 const sha256Hex = async (data: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), n => n.toString(16).padStart(2, "0")).join("");
+// 同一张图同时被多处要（页面一挂载就同时要显示用的抠图、结果图、对比用的抠图）只下一次：见 domain/asset-loader.ts 的 createSharedLoader。
+const sharedImageLoader = createSharedLoader(() => ({
+  fetchAsset: (url, attempt) => fetch(url, { signal: attempt, redirect: "error", credentials: "omit", cache: "no-store" }),
+  sha256Hex, store: browserAssetStore(),
+  sleep: (ms, abort) => new Promise<void>((resolve, reject) => {
+    if (abort.aborted) { reject(abort.reason); return; }
+    const timer = setTimeout(() => { abort.removeEventListener("abort", stop); resolve(); }, ms), stop = () => { clearTimeout(timer); reject(abort.reason); };
+    abort.addEventListener("abort", stop, { once: true });
+  }),
+}));
 
 export class ServiceError extends Error {
   constructor(readonly code: string, readonly status = 0) { super(code); }
@@ -77,17 +87,8 @@ export class WorkbenchService {
    */
   async image(asset: ServiceAsset, signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void): Promise<LocalAsset> {
     let blob: Blob;
-    try {
-      ({ blob } = await loadAsset(asset, {
-        fetchAsset: (url, attempt) => fetch(url, { signal: attempt, redirect: "error", credentials: "omit", cache: "no-store" }),
-        sha256Hex, store: browserAssetStore(),
-        sleep: (ms, abort) => new Promise<void>((resolve, reject) => {
-          if (abort.aborted) { reject(abort.reason); return; }
-          const timer = setTimeout(() => { abort.removeEventListener("abort", stop); resolve(); }, ms), stop = () => { clearTimeout(timer); reject(abort.reason); };
-          abort.addEventListener("abort", stop, { once: true });
-        }),
-      }, { signal, onProgress }));
-    } catch (error) {
+    try { ({ blob } = await sharedImageLoader(asset, { signal, onProgress })); }
+    catch (error) {
       if (error instanceof AssetLoadError) throw new ServiceError(error.code, error.status);
       throw error;
     }
