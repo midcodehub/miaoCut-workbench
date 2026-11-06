@@ -93,7 +93,7 @@
   .scene-card:hover { border-color: var(--wb-line-strong); }
   .scene-card.is-selected { border-color: var(--wb-accent); background: var(--wb-tint); }
   .scene-thumbnail { flex: none; width: 51px; height: 47px; overflow: hidden; position: relative; border-radius: 5px; }
-  .scene-marble { background-image: url('/workbench/demo/marble.png'); background-size: cover; background-position: center 66%; }
+  .scene-marble { background-image: url('/workbench/demo/marble.webp'); background-size: cover; background-position: center 66%; }
   .scene-wood { background: repeating-linear-gradient(1deg, transparent 0 2px, #9f75421c 2px 3px, transparent 3px 7px), linear-gradient(#f0e9dd 0 46%, #d3ae7b 47%, #c19a65 100%); }
   .scene-geometry { background: linear-gradient(#e2e5e8 0 56%, #fafbfc 57% 85%, #c9cdd1 86%); }
   .scene-geometry i { position: absolute; width: 22px; height: 21px; top: 8px; left: 0; background: #f6f7f8; border-right: 7px solid #d0d4d7; }
