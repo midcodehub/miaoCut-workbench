@@ -1,0 +1,23 @@
+scripts/assets.test.mjs
+  s_5e55143c7b307d::t_25cb0b28a51551 1-43
+src/app/globals.css
+  s_5e55143c7b307d::t_6c60b9b871810c 96
+src/client/demo-renderer.ts
+  s_5e55143c7b307d::t_befbc79717f73e 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "eb1e7323908dce45a92fdf6157a113db127ff249",
+  "prompts": {},
+  "sessions": {
+    "s_5e55143c7b307d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8225475b-c011-45a0-82d5-2e20004ed994",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "midcodehub <midcode@foxmail.com>"
+    }
+  }
+}
