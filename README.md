@@ -210,6 +210,8 @@ No image upload or render-job API is called. This mode must remain clearly label
 | `src/domain/batch.ts` | 主体检查、自动放置、请求构造、状态汇总与“显示哪个批次的结果”、ZIP 命名与打包、本地记录校验、“我的批次”列表校验。纯函数，不碰 DOM |
 | `src/domain/batch.test.ts` | 上述逻辑的单元测试 |
 | `src/domain/service-contracts.ts` | 批量请求、报价、批次视图、“我的批次”列表摘要的类型 |
+| `src/domain/asset-loader.ts` | 服务端图片（结果图、抠图）的下载器：先看本地缓存，下载时盯“多久没收到字节”（默认 20 秒，卡死就掐掉重试）、最多重试 2 次（间隔 1、3 秒；403、404、410 不重试）、进度回调、字节必须对上服务端公布的大小和 SHA-256；缓存读写失败不影响下载。逻辑与浏览器全局无关，网络、缓存、哈希、等待都注入，`asset-loader.test.ts` 用假的网络逐条测 |
+| `src/domain/asset-cache.ts` | 把浏览器 Cache Storage 包成下载器用的缓存：按“资产编号 + 内容指纹”存（下载链接是预签名的，HTTP 缓存认不出同一张图），放在本站私有路径 `/workbench/_asset-cache/` 下，默认最多 40 张，超过先删最旧的；`clear()` 清空 |
 | `src/client/use-batch.ts` | 页面状态：上传与提取调度、轮询、报价与确认、停止 / 继续、重新生成、下载、“我的批次”列表与按 groupId 取回 |
 | `src/client/service-api.ts` | 批量使用与四候选相同的一组接口（`group-quotes`、`groups`），请求里 `kind` 为 `batch`；`batches(limit)` 读取我的批次列表 |
 | `src/domain/internal-query.ts` | 内部 API 转发层唯一放行的查询串：`GET groups?kind=…&limit=…`，只认这两个参数、值必须在白名单里，转发时用校验过的值重新拼，其他查询串一律 404 |
