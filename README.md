@@ -250,3 +250,32 @@ v2 能力接口提供服务端报价：内测提取主体0积分，单张场景2
 资金、素材权限与任务编排均由私有网关负责。本仓库不配置服务角色密钥或收费开关。P0 `/workbench/product` 继续是本地交互演示，内部路由仍默认关闭；真实用户 OAuth、云端积分与 GPU 联合验收尚未完成。
 
 2026-10-26 账号联调更新：Google登录会明确选择账号，登录页显示当前浏览器账号；内测白名单拒绝会提示切换账户。用于避免浏览器默认Google会话误入内部测试。
+
+## 场景任务状态、冷启动和本机历史（2026-11-15）
+
+单张场景任务（`POST /comfy/v1/jobs`）在页面上一直查到服务端给出终态。网络中断会退避重试，不会停在转圈上等手动刷新。GPU 心跳为离线时按钮保持可点：网关 `createJob` 不看心跳，任务照样入队，调度器看到队列才拉节点。排队且 `queue.workerOnline === false` 时显示“正在启动 GPU，可能需要几分钟”。失败且积分预留已释放时显示“已退回 N 积分”。超过 35 分钟（服务端订单 30 分钟过期）仍未结束就不再转圈，但继续偶尔查询。
+
+“我的场景图”是这台浏览器 localStorage 里最近 20 张场景图（构图、状态、已扣 / 已退回 / 已预留的积分、预览和原图下载）。**网关没有列出单张任务的接口**（只有 `GET /comfy/v1/groups?kind=batch|candidates`）。换设备看不到这些单张图，除非主人在 miaoCut-pro 加一个按账户读 `comfy_orders` 的只读接口。
+
+显示用服务端 `preview`（WebP，对象键 `preview-<sha256>.webp`）。下载、海报、换色、批量 ZIP 取原始 PNG。
+
+### 画面质量（本仓库改不了）
+
+配方不在这个仓库。`product-t4x2-v2` 在 miaoCut-pro 的 `gpu-registry/src/comfy-graphs.js`（`productGraphV2`、`scenePromptV2`、`INPAINT_GROW_PX = 24`）和 `gpu-worker/comfy-lab` 的自定义节点里。下面三件都要在那边改，并且要一次真实 GPU 出图才能确认，这里没有改像素：
+
+| 现象 | 该改的地方 |
+|---|---|
+| 主体站在台面前沿 | `scenePromptV2` 只说了台面上有接触阴影，没说主体离前沿有一段台面。工作台只提交归一化 `placement`，不生成台面。 |
+| 主体周围的抠图碎屑 | 抠图节点 `BiRefNetRMBG` 的 `mask_blur: 0`、`mask_offset: 0`、`refine_foreground: false`。`MiaoCutEdgePolicy`（`feather_px: 2`、`opaque_product: true`）再把抠图核心贴回去，碎屑会被保住。 |
+| 直底人像没有接触阴影 | 阴影只能画在主体 alpha 外扩的 24 像素里。直边底部往往不够。要加长底部的外扩，或在 comfy-lab 里单独合成接触阴影。 |
+
+### 静态导出 / 拷进主站
+
+生产页是静态文件，挂在 `https://miaocut.app/workbench/`。不要部署这个仓库，也不要跑 `next start`。在本仓库：
+
+```bash
+npm ci
+node scripts/build-static.mjs --internal --api-url https://pro-api.miaocut.app
+```
+
+产物在 `dist/workbench/`（含 `index.html`、`product/internal/index.html`、`batch/index.html`、`BUILD.json`）。会话键不传时用源码里的 `sb-kaqlfoxselrvriulvlsm-auth-token`。然后在主站仓库 [midcodehub/miaoCut](https://github.com/midcodehub/miaoCut) 用这份目录整体替换 `workbench/`（先删掉旧的 `workbench/`，再拷进去，避免留下过期的 `_next` 文件），提交并按主站原有方式发布。不要把 `dist/` 提交进本仓库。

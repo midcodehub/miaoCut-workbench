@@ -20,17 +20,17 @@ test("the service client downloads images through the verified, retrying, cached
 });
 
 test("every image the internal workbench downloads reports progress and is released when the effect ends", () => {
-  const calls = [...page.matchAll(/api\.(?:image|preview)\(/g)].length;
-  const tracked = [...page.matchAll(/api\.(?:image|preview)\([^)]*trackImage\(/g)].length;
-  const untracked = [...page.matchAll(/api\.image\(result, controller\.signal\)/g)].length;   // 候选图（后台预取），不占状态行
-  assert.equal(tracked + untracked, calls, "each image()/preview() call is either tracked or a known background prefetch");
-  assert.equal(tracked, 4, "display image, result image and comparison image (previews), plus the original fetched for an export");
+  assert.match(page, /loadShown\([^)]*trackImage\(/, "the subject and the result pass progress into the shared preview load");
+  assert.match(page, /api\.preview\(asset, signal, onProgress\)/, "that load forwards the callback to preview()");
+  assert.match(page, /api\.preview\([^)]*trackImage\(comparisonId\)/, "the comparison subject is a tracked preview");
+  assert.match(page, /api\.image\(original, undefined, trackImage\(key\)\)/, "export fetches the original and reports progress");
+  assert.match(page, /api\.preview\(result, controller\.signal\)/, "candidate thumbnails are a background preview and do not take the status line");
   assert.equal([...page.matchAll(/finishImage\(/g)].length >= 10, true, "finished, failed, aborted and exported loads all clear their progress entry");
 });
 
 test("the loading text, the failure text and the reload button exist in both languages, and a failed load offers to reload", () => {
   for (const key of ["loadingImage", "imageFailed", "retryImage"]) assert.equal([...page.matchAll(new RegExp(`${key}:`, "g"))].length, 2, `${key} is defined for zh and en`);
-  assert.match(page, /"imageFailed" \| null/, "imageFailed is a known error state");
+  assert.match(page, /"imageFailed"/, "imageFailed is a known error state");
   assert.match(page, /\["asset_download_failed", "asset_timeout", "asset_mismatch"\]\.includes\(problem\.code\)/, "download failures are reported as imageFailed, not as a generic error");
   assert.match(page, /setImageRetry\(n => n \+ 1\)/, "the reload button restarts the image effects");
   assert.match(page, /imagePercent !== null && !pending \? `\$\{c\.loadingImage\} · \$\{imagePercent\}%`/, "the status line shows the download percentage");

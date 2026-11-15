@@ -20,12 +20,31 @@ export interface ServiceJob {
   error: string | null; outputs?: Partial<Record<"foreground" | "alpha" | "final", ServiceAsset>>;
   queue?: { workerOnline: boolean };
 }
+/**
+ * 这一台浏览器里记住的一张场景图（kind=product）。网关没有“列出我的任务”接口，所以换设备看不到；
+ * 同一台浏览器刷新后用 jobId 再查一次，积分和结果以服务端为准。
+ */
+export interface SceneHistoryEntry {
+  jobId: string;
+  scene: ProductDocument["scene"];
+  createdAt: number;
+  /** 这张图的积分。0 表示免费或未计费。 */
+  units: number;
+  billing: "held" | "confirmed" | "released" | "unbilled";
+  state: ServiceJob["state"];
+  error: string | null;
+  resultAssetId?: string;
+  /** 提交时的构图。用来在历史里重新打开这张图，之后的编辑不会改它。 */
+  document: ProductDocument;
+}
 export interface InternalDraft {
   version: 1; authUserId?: string; document: ProductDocument;
-  pending?: { request: ServiceJobRequest; jobId?: string; quoteId?:string };
+  pending?: { request: ServiceJobRequest; jobId?: string; quoteId?: string; startedAt?: number };
   /** 最近一次已确认的候选组。刷新后用 groupId 继续查询；创建请求可安全重发（服务端按 groupId + 请求内容幂等）。 */
   group?: { groupId: string; request: ServiceGroupRequest; confirmed?: true };
   result?: { assetId: string; document: ProductDocument };
+  /** 本机最近的场景任务，新的在前。坏行在读入时丢掉，不会变成请求。 */
+  history?: SceneHistoryEntry[];
   view: "draft" | "result";
 }
 export interface ServiceQuote {quoteId:string;units:number;expiresAt:number;pricingVersion:string;request:ServiceJobRequest;availableCredits:number;}
