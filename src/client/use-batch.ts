@@ -7,7 +7,8 @@ import {
   remoteBatchValid, remoteZipName, summaryActive, validBatchDraft, validGroupSummaries, zipFiles, zipName,
   type BatchDraft, type BatchEntryRecord, type BatchGroupRecord, type BatchPlan, type EntryOutcome,
 } from "@/domain/batch";
-import type { ServiceBatch, ServiceBatchItem, ServiceBatchQuote, ServiceBatchRequest, ServiceExecution, ServiceGroupSummary, ServiceJobRequest } from "@/domain/service-contracts";
+import type { ServiceAsset, ServiceBatch, ServiceBatchItem, ServiceBatchQuote, ServiceBatchRequest, ServiceExecution, ServiceGroupSummary, ServiceJobRequest } from "@/domain/service-contracts";
+import { pollBackoffMs, sceneSubmitAllowed } from "@/domain/scene-job";
 import { AssetError, downloadPng } from "./assets";
 import { ServiceError, WorkbenchService } from "./service-api";
 
@@ -221,20 +222,20 @@ export function useBatch(sessionKey: string) {
     const entries = current.current.entries;
     let uploads = uploading.current.size;
     for (const entry of entries) {
-      if (entry.stage === "uploading" && !uploading.current.has(entry.entryId) && uploads < UPLOAD_SLOTS && execution === "online") { uploads++; void uploadEntry(entry.entryId); }
+      if (entry.stage === "uploading" && !uploading.current.has(entry.entryId) && uploads < UPLOAD_SLOTS) { uploads++; void uploadEntry(entry.entryId); }
     }
     for (const entry of entries) {
       if (entry.stage === "extracting" && entry.segment?.jobId && !running.current.has(entry.entryId)) void extractEntry(entry.entryId, signal);
     }
     let active = entries.filter(entry => entry.stage === "extracting" && (running.current.has(entry.entryId) || !!entry.segment?.jobId)).length;
     for (const entry of entries) {
-      if (active >= SEGMENT_SLOTS || execution !== "online") break;
+      if (active >= SEGMENT_SLOTS) break;
       const waiting = entry.stage === "uploaded" || (entry.stage === "extracting" && !entry.segment?.jobId && !running.current.has(entry.entryId));
       if (!waiting) continue;
       if (entry.stage === "uploaded") patchEntry(entry.entryId, { stage: "extracting" });
       active++; void extractEntry(entry.entryId, signal);
     }
-  }, [connected, entriesKey, execution, uploadEntry, extractEntry, patchEntry, resume]);
+  }, [connected, entriesKey, uploadEntry, extractEntry, patchEntry, resume]);
 
   // 刷新后已就绪的商品：补读前景缩略图（只读元数据和图片，不提交任何任务）。
   // 下载共用整个连接周期的 AbortController（见上面的说明）：每到一张图就重启其余下载会让大批量时反复取消、重来。
@@ -259,6 +260,7 @@ export function useBatch(sessionKey: string) {
     async function track(record: BatchGroupRecord) {
       try {
         let view: ServiceBatch;
+        let failures = 0;
         if (!record.confirmed) {
           // 确认请求按 groupId + 请求内容幂等：确认响应丢失或刷新后重发，服务端返回同一个批次，不会再冻结积分。
           view = await api.createBatch(record.groupId, record.request, signal);
@@ -269,12 +271,25 @@ export function useBatch(sessionKey: string) {
           return;
         }
         while (!signal.aborted && exists(record.groupId)) {
-          view = await api.batch(record.groupId, signal);
-          if (signal.aborted || !exists(record.groupId)) return;
-          setViews(all => ({ ...all, [record.groupId]: view }));
-          // 没有执行中的项且批次不会自己推进（完成、停止、等待积分）时停止轮询；继续或停止操作会重新开始。
-          if (!batchActive(view)) return;
-          await sleep(POLL_MS, signal);
+          try {
+            view = await api.batch(record.groupId, signal);
+            if (signal.aborted || !exists(record.groupId)) return;
+            failures = 0;
+            setViews(all => ({ ...all, [record.groupId]: view }));
+            // 没有执行中的项且批次不会自己推进（完成、停止、等待积分）时停止轮询；继续或停止操作会重新开始。
+            if (!batchActive(view)) return;
+          } catch (error) {
+            if (signal.aborted) return;
+            const code = error instanceof ServiceError ? error.code : "";
+            if (code === "group_not_found" && exists(record.groupId)) {
+              try { const state = current.current; replace({ ...state, groups: state.groups.filter(group => group.groupId !== record.groupId) }); } catch (storageError) { report(storageError); }
+              return;
+            }
+            // 一次网络失败不停轮询：任务在服务端完成后，页面不用刷新也能看到。
+            if (error instanceof ServiceError && (error.status === 401 || error.status === 403)) { report(error); return; }
+            failures++;
+          }
+          await sleep(failures ? pollBackoffMs(failures) : POLL_MS, signal).catch(() => undefined);
         }
       } catch (error) {
         if (signal.aborted) return;
@@ -333,37 +348,50 @@ export function useBatch(sessionKey: string) {
     if (!connected || !opened || current.current.groups.some(group => group.groupId === opened)) return;
     const controller = new AbortController(), signal = controller.signal, groupId = opened;
     void (async () => {
-      try {
-        while (!signal.aborted) {
+      let failures = 0;
+      while (!signal.aborted) {
+        try {
           const view = await api.batch(groupId, signal);
           if (signal.aborted) return;
           if (!remoteBatchValid(view, groupId)) throw new ServiceError("protocol_mismatch");
+          failures = 0;
           setViews(all => ({ ...all, [groupId]: view }));
           if (!batchActive(view)) return;
-          await sleep(POLL_MS, signal);
+        } catch (error) {
+          if (signal.aborted) return;
+          if (error instanceof ServiceError && error.code === "group_not_found") { setOpened(null); setProblem("notFound"); return; }
+          if (error instanceof ServiceError && (error.code === "protocol_mismatch" || error.status === 401 || error.status === 403)) { report(error); return; }
+          failures++;
         }
-      } catch (error) {
-        if (signal.aborted) return;
-        if (error instanceof ServiceError && error.code === "group_not_found") { setOpened(null); setProblem("notFound"); } else report(error);
+        await sleep(failures ? pollBackoffMs(failures) : POLL_MS, signal).catch(() => undefined);
       }
     })();
     return () => controller.abort();
   }, [api, connected, opened, poll, report, resume]);
 
-  // 只下载已经完成的结果图；下载时校验大小和 SHA-256，失败的下一次轮询再试。
+  // 只下载已经完成的结果图，显示用预览（WebP）。轮询每 2 秒换一个新数组，不能因此把正在下的图掐掉——
+  // 以前候选图就是这样，成功之后转圈要到手动刷新才停。这里按连接周期泵一次，失败的过几秒再试，进行中的不重来。
   const succeededAssets = useMemo(() => Object.values(views).flatMap(view => view.items.flatMap(item => (item.result ? [item.result] : []))), [views]);
+  const succeededRef = useRef(succeededAssets);
+  useEffect(() => { succeededRef.current = succeededAssets; }, [succeededAssets]);
   useEffect(() => {
-    const signal = pipeline.current?.signal;
-    if (!connected || !signal || signal.aborted) return;
-    for (const asset of succeededAssets) {
-      if (loadingImages.current.has(asset.assetId)) continue;
-      loadingImages.current.add(asset.assetId);
-      void api.image(asset, signal).then(image => {
-        // 批次在下载途中被收起（loadingImages 已清掉这张图）就丢弃，不再占内存。
-        if (!signal.aborted && loadingImages.current.has(asset.assetId)) setResults(all => ({ ...all, [asset.assetId]: image }));
-      }).catch(() => { loadingImages.current.delete(asset.assetId); });
-    }
-  }, [api, connected, succeededAssets]);
+    if (!connected) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const pump = () => {
+      const signal = pipeline.current?.signal;
+      if (!signal || signal.aborted) return;
+      for (const asset of succeededRef.current) {
+        if (loadingImages.current.has(asset.assetId)) continue;
+        loadingImages.current.add(asset.assetId);
+        void api.preview(asset, signal).then(image => {
+          if (!signal.aborted && loadingImages.current.has(asset.assetId)) setResults(all => ({ ...all, [asset.assetId]: image }));
+        }).catch(() => { loadingImages.current.delete(asset.assetId); });
+      }
+      timer = setTimeout(pump, 3_000);
+    };
+    pump();
+    return () => clearTimeout(timer);
+  }, [api, connected]);
 
   // ── 页面操作 ─────────────────────────────────────────────────────────────────────────────────
   const locked = useMemo(() => new Set(draft.groups.flatMap(group => group.request.entries.map(entry => entry.entryId))), [draft.groups]);
@@ -417,8 +445,9 @@ export function useBatch(sessionKey: string) {
   const activeGroup = draft.groups.find(group => { const view = views[group.groupId]; return !group.confirmed || (view ? batchActive(view) || view.status === "paused" : true); });
 
   const quoteRequest = useCallback(async (request: ServiceBatchRequest | null, redo: boolean) => {
-    if (execution !== "online") { setProblem(execution); return; }
-    if (!connected || !pricing || pricing.admissionOpen === false || !limits || quoteLock.current) return;
+    // 心跳离线不是拒绝：网关照样入队，调度器看到队列才拉 GPU。
+    if (!sceneSubmitAllowed(pricing?.admissionOpen)) { setProblem("paused"); return; }
+    if (!connected || !pricing || !limits || quoteLock.current) return;
     if (!request) { setProblem("empty"); return; }
     if (activeGroup) return;
     quoteLock.current = true; setQuoting(true);
@@ -429,7 +458,7 @@ export function useBatch(sessionKey: string) {
       setOffer({ quote, request, redo }); setProblem(null);
     } catch (error) { report(error); }
     finally { quoteLock.current = false; setQuoting(false); }
-  }, [activeGroup, api, connected, execution, limits, pricing, report]);
+  }, [activeGroup, api, connected, limits, pricing, report]);
   /** 确认预算前才报价：用户检查主体、调整方案的时候不会创建报价（报价 5 分钟有效）。 */
   const requestQuote = useCallback(() => quoteRequest(batchRequestFor(current.current.entries, current.current.plan, crypto.randomUUID()), false), [quoteRequest]);
   /** 重新生成失败的项：用这几项（沿用原来的场景和构图）再提交一个新批次，成功的项保留。 */
@@ -443,7 +472,7 @@ export function useBatch(sessionKey: string) {
     await quoteRequest(picked.length ? { version: 1, requestId: crypto.randomUUID(), kind: "batch", entries: picked } : null, true);
   }, [outcomes, quoteRequest]);
   const acceptOffer = useCallback(() => {
-    if (execution !== "online") { setProblem(execution); return; }
+    if (!sceneSubmitAllowed(pricing?.admissionOpen)) { setProblem("paused"); return; }
     if (!offer || !connected || activeGroup) return;
     if (offer.quote.expiresAt <= Date.now()) { setOffer(undefined); setProblem("quoteExpired"); return; }
     // 先持久化 groupId 再提交确认：确认响应丢失时，刷新后用同一个 groupId 继续，不会建第二批。
@@ -452,7 +481,7 @@ export function useBatch(sessionKey: string) {
       replace({ ...state, groups: [...state.groups, { groupId: offer.quote.groupId, request: offer.request }] });
       setOffer(undefined); setProblem(null);
     } catch (error) { report(error); }
-  }, [activeGroup, connected, execution, offer, replace, report]);
+  }, [activeGroup, connected, offer, pricing, replace, report]);
   const groupAction = useCallback(async (groupId: string, action: "stop" | "resume") => {
     if (busy) return;
     setBusy(true);
@@ -478,42 +507,47 @@ export function useBatch(sessionKey: string) {
     setViews(all => { const next = { ...all }; delete next[groupId]; return next; });
   }, [opened, views]);
   const remoteResult = useCallback((item: ServiceBatchItem) => (item.state === "succeeded" && item.result ? results[item.result.assetId] : undefined), [results]);
-  const downloadRemoteOne = useCallback((item: ServiceBatchItem) => {
+  // 屏幕上可能是预览 WebP。下载和 ZIP 要原始 PNG：已经是原图就直接用，否则再取一次（缓存命中则不重下）。
+  const originalBlob = useCallback(async (asset: ServiceAsset, shown?: LocalAsset) => {
+    if (shown && shown.preview !== true) return shown.blob;
+    return (await api.image(await api.asset(asset.assetId))).blob;
+  }, [api]);
+  const downloadRemoteOne = useCallback(async (item: ServiceBatchItem) => {
     const image = remoteResult(item);
-    if (image) downloadPng(image.blob, remoteZipName(item.index, item.scene, new Set()));
-  }, [remoteResult]);
+    if (item.result && image) downloadPng(await originalBlob(item.result, image), remoteZipName(item.index, item.scene, new Set()));
+  }, [originalBlob, remoteResult]);
   /** 把这个批次已完成的结果打成 ZIP（文件名 product-NN_场景_1x1.png），在浏览器里完成。 */
   const downloadRemoteZip = useCallback(async (groupId: string) => {
     const view = views[groupId], used = new Set<string>(), items: { name: string; data: Uint8Array }[] = [];
     for (const item of view?.items ?? []) {
       const image = remoteResult(item);
-      if (image) items.push({ name: remoteZipName(item.index, item.scene, used), data: new Uint8Array(await image.blob.arrayBuffer()) });
+      if (item.result && image) items.push({ name: remoteZipName(item.index, item.scene, used), data: new Uint8Array(await (await originalBlob(item.result, image)).arrayBuffer()) });
     }
     if (items.length === 0) return 0;
     const chunks = await zipFiles(items);
     downloadPng(new Blob(chunks as BlobPart[], { type: "application/zip" }), `miaocut-batch-${groupId.slice(0, 8)}.zip`);
     return items.length;
-  }, [remoteResult, views]);
+  }, [originalBlob, remoteResult, views]);
 
   // ── 下载 ─────────────────────────────────────────────────────────────────────────────────────
   const resultOf = useCallback((entryId: string) => { const outcome = outcomes[entryId]; return outcome?.item.state === "succeeded" && outcome.item.result ? results[outcome.item.result.assetId] : undefined; }, [outcomes, results]);
   const scene = (entryId: string) => draft.groups.slice().reverse().map(group => group.request.entries.find(entry => entry.entryId === entryId)?.scene).find(Boolean) ?? draft.plan.scene;
-  const downloadOne = useCallback((entryId: string) => {
-    const entry = draft.entries.find(item => item.entryId === entryId), image = resultOf(entryId);
-    if (entry && image) downloadPng(image.blob, zipName(entry.fileName, scene(entryId), "1:1", new Set()));
-  }, [draft.entries, resultOf]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** 把已完成的结果按页面顺序打成 ZIP，在浏览器里完成，服务器不额外存一份。 */
+  const downloadOne = useCallback(async (entryId: string) => {
+    const entry = draft.entries.find(item => item.entryId === entryId), image = resultOf(entryId), asset = outcomes[entryId]?.item.result;
+    if (entry && image && asset) downloadPng(await originalBlob(asset, image), zipName(entry.fileName, scene(entryId), "1:1", new Set()));
+  }, [draft.entries, originalBlob, outcomes, resultOf]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** 把已完成的结果按页面顺序打成 ZIP，在浏览器里完成，服务器不额外存一份。ZIP 里是原始 PNG，不是预览。 */
   const downloadZip = useCallback(async () => {
     const used = new Set<string>(), items: { name: string; data: Uint8Array }[] = [];
     for (const entry of draft.entries) {
-      const image = resultOf(entry.entryId);
-      if (image) items.push({ name: zipName(entry.fileName, scene(entry.entryId), "1:1", used), data: new Uint8Array(await image.blob.arrayBuffer()) });
+      const image = resultOf(entry.entryId), asset = outcomes[entry.entryId]?.item.result;
+      if (image && asset) items.push({ name: zipName(entry.fileName, scene(entry.entryId), "1:1", used), data: new Uint8Array(await (await originalBlob(asset, image)).arrayBuffer()) });
     }
     if (items.length === 0) return 0;
     const chunks = await zipFiles(items);
     downloadPng(new Blob(chunks as BlobPart[], { type: "application/zip" }), `miaocut-batch-${new Date().toISOString().slice(0, 10)}.zip`);
     return items.length;
-  }, [draft.entries, resultOf]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft.entries, originalBlob, outcomes, resultOf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setLocale = (value: Locale) => {
     setLocaleState(value); document.documentElement.lang = value === "zh" ? "zh-CN" : "en";

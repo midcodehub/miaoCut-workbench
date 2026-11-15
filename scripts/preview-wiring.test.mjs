@@ -21,14 +21,20 @@ test("the service client has a preview() that uses the same verified shared load
 });
 
 test("the three images the page shows (subject, result, comparison subject) come from preview(), and none of them from image()", () => {
-  assert.equal([...page.matchAll(/api\.preview\([^)]*trackImage\(/g)].length, 3);
+  assert.match(page, /loadShown\(displayAssetId/, "the subject on the canvas is the preview");
+  assert.match(page, /loadShown\(resultId/, "the finished scene is the preview");
+  assert.match(page, /api\.preview\(/, "preview() is what those loads call");
+  assert.match(page, /trackImage\(comparisonId\)/);
   assert.equal([...page.matchAll(/api\.image\([^)]*trackImage\(/g)].length, 1, "the only tracked image() left is the export fetch of the original");
-  assert.match(page, /api\.image\(result, controller\.signal\)/, "candidate images (their own flow) still use the original");
+  assert.ok(!/api\.image\(result/.test(page), "candidate thumbnails use preview(), not the original PNG");
+  assert.match(page, /api\.preview\(result, controller\.signal\)/);
 });
 
 test("downloading, making a poster and recolouring take the original PNG, never the blob that is on screen", () => {
   assert.ok(!/downloadPng\(output\.blob/.test(page), "no download of the displayed result blob");
+  assert.ok(!/downloadPng\(previewImage\.blob/.test(page), "candidate download does not use the preview on screen");
   assert.ok(!/makePoster\(output\.blob/.test(page) && !/makeRecolor\(output\.blob/.test(page), "no handoff of the displayed result blob");
+  assert.ok(!/makePoster\(previewImage/.test(page) && !/makeRecolor\(previewImage/.test(page), "candidate poster and recolour take the original");
   assert.match(page, /exportOriginal\(record\.result!\.assetId/, "the result's exports go through the original fetch");
   assert.match(page, /const exportOriginal = /);
   assert.match(page, /loadOriginal=\{/, "the comparison panel gets a way to fetch the originals for its two downloads");

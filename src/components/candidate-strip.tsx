@@ -8,7 +8,7 @@ import { BlobImage } from "./blob-image";
 
 const copy = {
   zh: {
-    title: "候选", candidate: "候选", waiting: "等待中", requeued: "超时后重新排队", awaiting_credits: "等待积分", queued: "已排队", offline: "服务离线 · 排队中",
+    title: "候选", candidate: "候选", waiting: "等待中", requeued: "超时后重新排队", awaiting_credits: "等待积分", queued: "已排队", offline: "正在启动 GPU · 排队中",
     leased: "正在生成", verifying: "正在保存", settling: "正在确认积分", succeeded: "已完成", expired: "排队超时 · 未扣积分", failed: "未完成 · 未扣积分",
     cancelled: "已停止 · 未扣积分", stop: "停止剩余候选", resume: "已补充积分，继续", selected: "已选定",
     insufficient: "可用积分不足，剩余候选已暂停，不会失败也不会超支。补充积分后点“继续”。",
@@ -18,7 +18,7 @@ const copy = {
     credits: (g: ServiceGroup) => `已扣 ${g.settledUnits} · 预留 ${g.heldUnits} / 预算 ${g.budgetUnits} 积分`,
   },
   en: {
-    title: "Candidates", candidate: "Candidate", waiting: "Waiting", requeued: "Requeued after timeout", awaiting_credits: "Waiting for credits", queued: "Queued", offline: "Service offline · queued",
+    title: "Candidates", candidate: "Candidate", waiting: "Waiting", requeued: "Requeued after timeout", awaiting_credits: "Waiting for credits", queued: "Queued", offline: "Starting GPU · queued",
     leased: "Generating", verifying: "Saving", settling: "Confirming credits", succeeded: "Ready", expired: "Timed out · not charged", failed: "Not completed · not charged",
     cancelled: "Stopped · not charged", stop: "Stop remaining", resume: "Credits added, continue", selected: "Selected",
     insufficient: "Not enough credits. Remaining candidates are paused; nothing fails or overspends. Add credits, then continue.",
